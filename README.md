@@ -25,6 +25,10 @@ arrives you have run out of travel and must **release and re-grip further back**
 exactly as in the lab. Put a second hand on the shaft to steady it and the tip
 tracks torque more faithfully and buckles less.
 
+There are two devices on that shaft, coaxially: catheter from the sheath to the
+hub, bare guidewire beyond it. So **where you take hold decides what you move** —
+no mode, no toggle, just the place your hand lands.
+
 Stack: **Unity 2022.3 LTS · OpenXR · XR Interaction Toolkit · Quest 3 standalone**.
 See [docs/VR_SETUP.md](docs/VR_SETUP.md) for the rationale and the build steps.
 
@@ -39,6 +43,7 @@ See [docs/VR_SETUP.md](docs/VR_SETUP.md) for the rationale and the build steps.
 | **Complications** | Per-vessel trauma accumulates and converts to dissection, then perforation; ostial dwell causes damping and ischaemia; unpurged lines cause air embolism |
 | **Dose** | Screening time and cumulative mGy, with steep angulation costing more |
 | **Assessment** | Every step, complication and overrun recorded, scored out of 100 with a graded debrief |
+| **Wire-led technique** | The catheter is railed to the guidewire's path while the wire leads, so it cannot engage an ostium until the wire is pulled back — and running on past the wire tip is possible, but the vessel remembers |
 | **Fluoroscopy** | A real orthographic projection through additively-blended radiopaque meshes, inverted to film; grain scales inversely with dose rate, and releasing the pedal leaves last image hold |
 
 Trauma is **cumulative and does not heal**. Rough handling early costs the trainee
@@ -67,10 +72,10 @@ Assets/
   Scripts/
     Vasculature/   VesselSegment, VesselNetwork, VesselNetworkLoader, VesselMeshBuilder
     Catheter/      CatheterState, CatheterNavigator, CatheterProfile,
-                   CatheterInputDriver, CatheterRenderer
-    Interaction/   ICatheterInput, CatheterShaftInteractable, HapticDriver,
+                   CoaxialSystem, CatheterRenderer
+    Interaction/   ICoaxialInput, CoaxialShaftInteractable, HapticDriver,
                    ContrastSyringe, FluoroPedal, ProjectionPresetButton,
-                   DesktopCatheterInput
+                   DesktopCoaxialInput
     Physiology/    PatientVitals
     Complications/ ComplicationSystem
     Core/          ProcedureDefinition, ProcedureLoader, ProcedureRunner
@@ -96,8 +101,8 @@ generated rather than committed because a Unity scene file is a wall of GUIDs
 nobody can review — this way the layout is code you can read in a diff, and an
 anatomy change is one menu click away from being in the scene.
 
-No headset? Swap the `CatheterInputDriver`'s input source for
-`DesktopCatheterInput` (W/S advance, A/D torque), or just open
+No headset? Swap the `CoaxialSystem`'s input source for `DesktopCoaxialInput`
+(W/S advance, A/D torque, Tab to switch between wire and catheter), or just open
 `preview/index.html`.
 
 ## Extending it
@@ -115,7 +120,8 @@ No headset? Swap the `CatheterInputDriver`'s input source for
 ## Roadmap
 
 - Contrast opacification in the 3D fluoroscopy path (the preview already does it)
-- Guidewire-then-catheter workflow (the wire leads, the catheter follows)
+- Blocking contrast injection while the wire is still through the catheter tip
+- Porting the guidewire workflow into the browser preview, which is still single-catheter
 - Radial access as an alternative route, with subclavian tortuosity
 - Instructor mode: inject a complication mid-run and grade the response
 - Session export for review across a cohort

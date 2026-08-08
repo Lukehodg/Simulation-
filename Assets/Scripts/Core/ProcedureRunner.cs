@@ -12,7 +12,7 @@ namespace CardioVR.Core
     public class ProcedureRunner : MonoBehaviour
     {
         [SerializeField] ProcedureDefinition procedure;
-        [SerializeField] CatheterNavigator navigator;
+        [SerializeField] CoaxialSystem coaxial;
         [SerializeField] FluoroscopyController fluoroscopy;
         [SerializeField] PatientVitals vitals;
         [SerializeField] PerformanceRecorder recorder;
@@ -50,9 +50,21 @@ namespace CardioVR.Core
                 case StepGoal.ObtainArterialAccess:
                     return arterialAccessObtained;
 
+                case StepGoal.AdvanceGuidewire:
+                    return coaxial.Guidewire.State.TipSegmentId == step.targetSegmentId;
+
+                case StepGoal.TrackCatheterOverWire:
+                    // Reaching the target is not enough — it has to have been reached
+                    // over the wire rather than by pushing a bare catheter up there.
+                    return coaxial.Catheter.State.TipSegmentId == step.targetSegmentId
+                           && coaxial.CatheterIsRailed;
+
+                case StepGoal.WithdrawGuidewire:
+                    return !coaxial.WireThroughTip;
+
                 case StepGoal.AdvanceToSegment:
                 case StepGoal.EngageOstium:
-                    return navigator.State.TipSegmentId == step.targetSegmentId;
+                    return coaxial.Catheter.State.TipSegmentId == step.targetSegmentId;
 
                 case StepGoal.InjectContrast:
                     return fluoroscopy.ContrastUsedMl - contrastAtStepStart >= step.minContrastMl;
@@ -62,8 +74,8 @@ namespace CardioVR.Core
                         step.primaryAngleDegrees, step.secondaryAngleDegrees, step.angleToleranceDegrees);
 
                 case StepGoal.WithdrawCatheter:
-                    return navigator.State.TipSegmentId == procedure.vesselNetworkAccessId
-                           && navigator.State.TipDepthCm <= 0.5f;
+                    return coaxial.Catheter.State.TipSegmentId == procedure.vesselNetworkAccessId
+                           && coaxial.Catheter.State.TipDepthCm <= 0.5f;
 
                 case StepGoal.AchieveHemostasis:
                     return hemostasisAchieved;

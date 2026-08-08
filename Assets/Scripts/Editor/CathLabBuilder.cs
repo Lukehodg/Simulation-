@@ -67,6 +67,7 @@ namespace CardioVR.EditorTools
             public VesselNetwork Network;
             public ProcedureDefinition Procedure;
             public CatheterProfile Catheter;
+            public CatheterProfile Guidewire;
             public Material Radiopaque;
             public Material FluoroDisplay;
             public Material MonitorScreen;
@@ -85,8 +86,24 @@ namespace CardioVR.EditorTools
             catheter.displayName = "Judkins Left 4.0";
             catheter.kind = CatheterKind.DiagnosticCoronary;
             catheter.frenchSize = 5f;
+            catheter.totalLengthCm = 100f;
             catheter.intendedOstiaIds = new[] { "left_main" };
+            catheter.traumaMultiplier = 1f;
+            catheter.canEnterCoronaries = true;
             SaveAsset(catheter, "CatheterProfile.asset");
+
+            // A 0.035" J-tip wire: soft, blunt, and 50 cm longer than the catheter so
+            // its back end stays holdable while the catheter tracks over it.
+            var guidewire = ScriptableObject.CreateInstance<CatheterProfile>();
+            guidewire.displayName = "0.035\" J-tip guidewire";
+            guidewire.kind = CatheterKind.Guidewire;
+            guidewire.frenchSize = 2.7f;
+            guidewire.totalLengthCm = 150f;
+            guidewire.shaftStiffness = 0.35f;
+            guidewire.torqueResponse = 0.6f;
+            guidewire.traumaMultiplier = 0.2f;
+            guidewire.canEnterCoronaries = false;
+            SaveAsset(guidewire, "GuidewireProfile.asset");
 
             var target = new RenderTexture(1024, 1024, 24, RenderTextureFormat.ARGBHalf)
             {
@@ -111,6 +128,7 @@ namespace CardioVR.EditorTools
                 Network = network,
                 Procedure = procedure,
                 Catheter = catheter,
+                Guidewire = guidewire,
                 Radiopaque = radiopaque,
                 FluoroDisplay = display,
                 MonitorScreen = monitor,
@@ -172,6 +190,7 @@ namespace CardioVR.EditorTools
             public Transform Root;
             public Transform Sheath;
             public GameObject CatheterMesh;
+            public GameObject GuidewireMesh;
         }
 
         static Anatomy BuildAnatomy(Assets assets, int layer)
@@ -185,12 +204,8 @@ namespace CardioVR.EditorTools
             vessels.SetParent(root, false);
             VesselMeshBuilder.BuildTree(assets.Network, vessels, assets.Radiopaque, layer);
 
-            var catheterMesh = new GameObject("CatheterMesh") { layer = layer };
-            catheterMesh.transform.SetParent(root, false);
-            catheterMesh.AddComponent<MeshFilter>();
-            var renderer = catheterMesh.AddComponent<MeshRenderer>();
-            renderer.sharedMaterial = assets.Radiopaque;
-            renderer.shadowCastingMode = ShadowCastingMode.Off;
+            var catheterMesh = DeviceMesh("CatheterMesh", root, assets.Radiopaque, layer);
+            var guidewireMesh = DeviceMesh("GuidewireMesh", root, assets.Radiopaque, layer);
 
             // Right femoral puncture, on the patient's right, shaft pointing up and
             // out of the groin toward the operator.
@@ -198,14 +213,33 @@ namespace CardioVR.EditorTools
             sheath.position = new Vector3(-0.12f, 1.16f, 0.42f);
             sheath.rotation = Quaternion.LookRotation(new Vector3(-0.35f, 0.55f, 0.75f).normalized, Vector3.up);
 
-            return new Anatomy { Root = root, Sheath = sheath, CatheterMesh = catheterMesh };
+            return new Anatomy
+            {
+                Root = root,
+                Sheath = sheath,
+                CatheterMesh = catheterMesh,
+                GuidewireMesh = guidewireMesh
+            };
+        }
+
+        static GameObject DeviceMesh(string name, Transform parent, Material material, int layer)
+        {
+            var go = new GameObject(name) { layer = layer };
+            go.transform.SetParent(parent, false);
+            go.AddComponent<MeshFilter>();
+
+            var renderer = go.AddComponent<MeshRenderer>();
+            renderer.sharedMaterial = material;
+            renderer.shadowCastingMode = ShadowCastingMode.Off;
+            renderer.receiveShadows = false;
+            return go;
         }
 
         /* ------------------------------------------------------------- simulation */
 
         class Simulation
         {
-            public CatheterNavigator Navigator;
+            public CoaxialSystem Coaxial;
             public PatientVitals Vitals;
             public ComplicationSystem Complications;
             public FluoroscopyController Fluoroscopy;
@@ -217,15 +251,14 @@ namespace CardioVR.EditorTools
         {
             var go = new GameObject("Simulation");
 
-            var tip = new GameObject("CatheterTip").transform;
-            tip.SetParent(anatomy.Root, false);
+            var catheterNav = BuildDevice(go.transform, anatomy.Root, "Catheter", assets.Network, assets.Catheter);
+            var guidewireNav = BuildDevice(go.transform, anatomy.Root, "Guidewire", assets.Network, assets.Guidewire);
 
-            var navigator = go.AddComponent<CatheterNavigator>();
-            Wire(navigator, so =>
+            var coaxial = go.AddComponent<CoaxialSystem>();
+            Wire(coaxial, so =>
             {
-                so.FindProperty("network").objectReferenceValue = assets.Network;
-                so.FindProperty("profile").objectReferenceValue = assets.Catheter;
-                so.FindProperty("tipMarker").objectReferenceValue = tip;
+                so.FindProperty("guidewire").objectReferenceValue = guidewireNav;
+                so.FindProperty("catheter").objectReferenceValue = catheterNav;
             });
 
             var vitals = go.AddComponent<PatientVitals>();
@@ -233,7 +266,7 @@ namespace CardioVR.EditorTools
             var complications = go.AddComponent<ComplicationSystem>();
             Wire(complications, so =>
             {
-                so.FindProperty("navigator").objectReferenceValue = navigator;
+                so.FindProperty("coaxial").objectReferenceValue = coaxial;
                 so.FindProperty("vitals").objectReferenceValue = vitals;
             });
 
@@ -247,7 +280,7 @@ namespace CardioVR.EditorTools
             Wire(runner, so =>
             {
                 so.FindProperty("procedure").objectReferenceValue = assets.Procedure;
-                so.FindProperty("navigator").objectReferenceValue = navigator;
+                so.FindProperty("coaxial").objectReferenceValue = coaxial;
                 so.FindProperty("fluoroscopy").objectReferenceValue = fluoroscopy;
                 so.FindProperty("vitals").objectReferenceValue = vitals;
                 so.FindProperty("recorder").objectReferenceValue = recorder;
@@ -262,22 +295,49 @@ namespace CardioVR.EditorTools
                 so.FindProperty("complications").objectReferenceValue = complications;
             });
 
-            var catheterRenderer = anatomy.CatheterMesh.AddComponent<CatheterRenderer>();
-            Wire(catheterRenderer, so =>
-            {
-                so.FindProperty("navigator").objectReferenceValue = navigator;
-                so.FindProperty("profile").objectReferenceValue = assets.Catheter;
-            });
+            AttachRenderer(anatomy.CatheterMesh, catheterNav, assets.Catheter);
+            AttachRenderer(anatomy.GuidewireMesh, guidewireNav, assets.Guidewire);
 
             return new Simulation
             {
-                Navigator = navigator,
+                Coaxial = coaxial,
                 Vitals = vitals,
                 Complications = complications,
                 Fluoroscopy = fluoroscopy,
                 Recorder = recorder,
                 Runner = runner
             };
+        }
+
+        static CatheterNavigator BuildDevice(
+            Transform parent, Transform anatomyRoot, string name,
+            VesselNetwork network, CatheterProfile profile)
+        {
+            var go = new GameObject(name);
+            go.transform.SetParent(parent, false);
+
+            var tip = new GameObject(name + "Tip").transform;
+            tip.SetParent(anatomyRoot, false);
+
+            var navigator = go.AddComponent<CatheterNavigator>();
+            Wire(navigator, so =>
+            {
+                so.FindProperty("network").objectReferenceValue = network;
+                so.FindProperty("profile").objectReferenceValue = profile;
+                so.FindProperty("tipMarker").objectReferenceValue = tip;
+            });
+
+            return navigator;
+        }
+
+        static void AttachRenderer(GameObject mesh, CatheterNavigator navigator, CatheterProfile profile)
+        {
+            var renderer = mesh.AddComponent<CatheterRenderer>();
+            Wire(renderer, so =>
+            {
+                so.FindProperty("navigator").objectReferenceValue = navigator;
+                so.FindProperty("profile").objectReferenceValue = profile;
+            });
         }
 
         /* ------------------------------------------------------------------ C-arm */
@@ -410,21 +470,24 @@ namespace CardioVR.EditorTools
 
         static void BuildTableside(Assets assets, Simulation simulation, Anatomy anatomy, XROrigin origin)
         {
-            // Catheter shaft: grabbable, protruding from the sheath.
-            var shaft = new GameObject("CatheterShaft");
-            var capsule = shaft.AddComponent<CapsuleCollider>();
-            capsule.isTrigger = true;
-            capsule.direction = 2;
+            // The coaxial shaft: catheter from the sheath to the hub, bare wire beyond
+            // it. Two colliders, because which one you grab is what decides which
+            // device you are moving.
+            var shaft = new GameObject("CoaxialShaft");
 
-            var shaftInteractable = shaft.AddComponent<CatheterShaftInteractable>();
+            var catheterCollider = ShaftSegmentCollider(shaft.transform, "CatheterShaft");
+            var wireCollider = ShaftSegmentCollider(shaft.transform, "GuidewireStub");
+
+            var shaftInteractable = shaft.AddComponent<CoaxialShaftInteractable>();
             Wire(shaftInteractable, so =>
             {
                 so.FindProperty("sheath").objectReferenceValue = anatomy.Sheath;
-                so.FindProperty("navigator").objectReferenceValue = simulation.Navigator;
+                so.FindProperty("catheterCollider").objectReferenceValue = catheterCollider;
+                so.FindProperty("wireCollider").objectReferenceValue = wireCollider;
             });
 
-            var driver = simulation.Navigator.gameObject.AddComponent<CatheterInputDriver>();
-            Wire(driver, so => so.FindProperty("inputSource").objectReferenceValue = shaftInteractable);
+            Wire(simulation.Coaxial,
+                 so => so.FindProperty("inputSource").objectReferenceValue = shaftInteractable);
 
             // Screening pedal on the floor, operator side.
             var pedalObject = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -465,6 +528,17 @@ namespace CardioVR.EditorTools
             });
 
             BuildProjectionPad(simulation);
+        }
+
+        static CapsuleCollider ShaftSegmentCollider(Transform parent, string name)
+        {
+            var go = new GameObject(name);
+            go.transform.SetParent(parent, false);
+
+            var capsule = go.AddComponent<CapsuleCollider>();
+            capsule.isTrigger = true;
+            capsule.direction = 2;
+            return capsule;
         }
 
         /// The stored projections a lab keeps on its control pad. These four cover

@@ -39,7 +39,7 @@ namespace CardioVR.Complications
     /// rough handling early costs the trainee later, which is the teaching point.
     public class ComplicationSystem : MonoBehaviour
     {
-        [SerializeField] CatheterNavigator navigator;
+        [SerializeField] CoaxialSystem coaxial;
         [SerializeField] PatientVitals vitals;
 
         [Header("Thresholds")]
@@ -59,20 +59,29 @@ namespace CardioVR.Complications
 
         void OnEnable()
         {
-            navigator.WallContact += OnWallContact;
-            navigator.Buckled += OnBuckled;
+            foreach (var device in Devices())
+            {
+                device.WallContact += OnWallContact;
+                device.Buckled += OnBuckled;
+            }
         }
 
         void OnDisable()
         {
-            navigator.WallContact -= OnWallContact;
-            navigator.Buckled -= OnBuckled;
+            foreach (var device in Devices())
+            {
+                device.WallContact -= OnWallContact;
+                device.Buckled -= OnBuckled;
+            }
         }
+
+        CatheterNavigator[] Devices() => new[] { coaxial.Guidewire, coaxial.Catheter };
 
         void Update()
         {
-            var tip = navigator.State.TipSegmentId;
-            var segment = navigator.TipSegment;
+            var catheter = coaxial.Catheter;
+            var tip = catheter.State.TipSegmentId;
+            var segment = catheter.TipSegment;
 
             if (segment != null && segment.isCoronary)
             {
@@ -95,9 +104,11 @@ namespace CardioVR.Complications
             if (bloodLossMl > 0f) vitals.ApplyBloodLoss(bloodLossMl);
         }
 
-        void OnWallContact(VesselSegment segment, float overlapMm)
+        void OnWallContact(CatheterNavigator device, VesselSegment segment, float overlapMm)
         {
-            float delta = overlapMm * Time.deltaTime * (1f + segment.tortuosity);
+            // A soft wire scuffing a wall is not the same event as a stiff catheter
+            // doing it unsupported, and the trauma model has to know the difference.
+            float delta = overlapMm * Time.deltaTime * (1f + segment.tortuosity) * device.TraumaFactor;
             traumaBySegment.TryGetValue(segment.id, out float trauma);
             trauma += delta;
             traumaBySegment[segment.id] = trauma;
@@ -114,11 +125,11 @@ namespace CardioVR.Complications
             }
         }
 
-        void OnBuckled()
+        void OnBuckled(CatheterNavigator device)
         {
-            var tip = navigator.State.TipSegmentId;
+            var tip = device.State.TipSegmentId;
             traumaBySegment.TryGetValue(tip, out float trauma);
-            traumaBySegment[tip] = trauma + (navigator.Stabilised ? 0.06f : 0.15f);
+            traumaBySegment[tip] = trauma + (device.Stabilised ? 0.06f : 0.15f) * device.TraumaFactor;
         }
 
         public void NotifySheathInsertion(float force)
@@ -134,10 +145,10 @@ namespace CardioVR.Complications
             vitals.ApplyContrastBolus(volumeMl);
 
             if (!airPurged)
-                Raise(ComplicationType.AirEmbolism, navigator.State.TipSegmentId, 0.8f);
+                Raise(ComplicationType.AirEmbolism, coaxial.Catheter.State.TipSegmentId, 0.8f);
 
             if (volumeMl > 10f)
-                Raise(ComplicationType.ContrastInducedArrhythmia, navigator.State.TipSegmentId,
+                Raise(ComplicationType.ContrastInducedArrhythmia, coaxial.Catheter.State.TipSegmentId,
                       Mathf.Clamp01((volumeMl - 10f) / 8f));
         }
 

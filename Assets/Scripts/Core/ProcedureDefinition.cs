@@ -7,6 +7,9 @@ namespace CardioVR.Core
     public enum StepGoal
     {
         ObtainArterialAccess,
+        AdvanceGuidewire,
+        TrackCatheterOverWire,
+        WithdrawGuidewire,
         AdvanceToSegment,
         EngageOstium,
         InjectContrast,
@@ -23,7 +26,7 @@ namespace CardioVR.Core
         [TextArea(2, 4)] public string instruction;
         public StepGoal goal;
 
-        [Tooltip("Vessel the tip must reach, for AdvanceToSegment and EngageOstium.")]
+        [Tooltip("Vessel the tip must reach, for the goals that move a device to a place.")]
         public string targetSegmentId;
 
         [Tooltip("Contrast required for this step, in ml.")]
