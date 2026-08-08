@@ -35,6 +35,18 @@ through controller haptics.
 Trauma is **cumulative and does not heal**. Rough handling early costs the trainee
 later — that's the teaching point, not a bug.
 
+## Browser preview
+
+`preview/index.html` is a self-contained, playable preview of the whole procedure —
+the same anatomy dataset and the same navigation rules as the Unity build, rendered
+on canvas. Open the file in any browser. It exists so the interaction model can be
+reviewed by clinicians without a headset or a Unity licence.
+
+`W`/`S` advance and withdraw · `A`/`D` torque · `Space` screen · `C` inject · `F` hold
+
+The projection maths is real: the C-arm angles rotate the vessel tree, so LAO 40 /
+CRA 20 genuinely opens the left main bifurcation the way it does in the lab.
+
 ## Layout
 
 ```

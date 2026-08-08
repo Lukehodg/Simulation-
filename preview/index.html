@@ -1,0 +1,1798 @@
+<title>CardioVR — Cath Lab Preview</title>
+
+<style>
+  :root {
+    --room:        #090B0E;
+    --console:     #11151A;
+    --console-2:   #171C23;
+    --rule:        #232C36;
+    --rule-bright: #35424F;
+    --ink:         #C6D2DD;
+    --ink-dim:     #7B8B9A;
+    --ink-faint:   #4E5C69;
+
+    --amber:       #F0B23C;
+    --amber-glow:  rgba(240, 178, 60, 0.22);
+    --ecg:         #4BE39A;
+    --art:         #FF5C57;
+    --spo2:        #4FD2E4;
+
+    --film:        #C8C6BF;
+    --film-2:      #A9A79F;
+    --vessel:      #14161A;
+
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", "Roboto Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+
+    --step: clamp(0.68rem, 0.62rem + 0.2vw, 0.76rem);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--room);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .lab {
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 20px 18px 40px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  /* ---------- masthead ---------- */
+
+  .masthead {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .wordmark {
+    font-family: var(--mono);
+    font-size: 1.05rem;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    margin: 0;
+  }
+
+  .wordmark span { color: var(--amber); }
+
+  .masthead p {
+    margin: 0;
+    font-size: var(--step);
+    color: var(--ink-dim);
+    max-width: 46ch;
+  }
+
+  /* ---------- console grid ---------- */
+
+  .console {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 316px;
+    gap: 14px;
+    align-items: start;
+  }
+
+  @media (max-width: 900px) {
+    .console { grid-template-columns: minmax(0, 1fr); }
+  }
+
+  .panel {
+    background: var(--console);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+  }
+
+  .panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 8px 11px;
+    border-bottom: 1px solid var(--rule);
+    font-family: var(--mono);
+    font-size: 0.64rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+
+  /* ---------- fluoroscopy ---------- */
+
+  .fluoro-wrap { position: relative; }
+
+  #fluoro {
+    display: block;
+    width: 100%;
+    height: auto;
+    aspect-ratio: 4 / 3;
+    background: var(--film);
+  }
+
+  .xray-lamp {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--ink-faint);
+  }
+
+  .lamp-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--rule-bright);
+    transition: background 90ms linear, box-shadow 90ms linear;
+  }
+
+  .screening .lamp-dot {
+    background: var(--amber);
+    box-shadow: 0 0 0 3px var(--amber-glow), 0 0 10px var(--amber);
+  }
+
+  .screening .xray-lamp { color: var(--amber); }
+
+  .overlay {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    font-family: var(--mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.06em;
+    color: #3C3A35;
+  }
+
+  .overlay .tl { position: absolute; top: 10px; left: 12px; }
+  .overlay .tr { position: absolute; top: 10px; right: 12px; text-align: right; }
+  .overlay .bl { position: absolute; bottom: 10px; left: 12px; }
+
+  .buckle-flash {
+    position: absolute;
+    inset: 0;
+    border: 3px solid var(--art);
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .buckling .buckle-flash { opacity: 0.85; }
+
+  /* ---------- right rail ---------- */
+
+  .rail {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  #ecg {
+    display: block;
+    width: 100%;
+    height: 74px;
+    background: #05070A;
+  }
+
+  .vitals {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    border-top: 1px solid var(--rule);
+  }
+
+  .vital {
+    padding: 8px 10px 10px;
+    border-right: 1px solid var(--rule);
+  }
+
+  .vital:last-child { border-right: 0; }
+
+  .vital-label {
+    font-family: var(--mono);
+    font-size: 0.56rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+
+  .vital-value {
+    font-family: var(--mono);
+    font-size: 1.32rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.15;
+  }
+
+  .vital-value small {
+    font-size: 0.62rem;
+    font-weight: 400;
+    color: var(--ink-faint);
+    letter-spacing: 0.04em;
+  }
+
+  .v-hr    { color: var(--ecg); }
+  .v-bp    { color: var(--art); }
+  .v-spo2  { color: var(--spo2); }
+
+  .rhythm-strip {
+    padding: 7px 10px;
+    border-top: 1px solid var(--rule);
+    font-family: var(--mono);
+    font-size: 0.64rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .rhythm-strip.alarm {
+    color: var(--art);
+    background: rgba(255, 92, 87, 0.09);
+  }
+
+  /* ---------- step card ---------- */
+
+  .step-body { padding: 11px; }
+
+  .step-counter {
+    font-family: var(--mono);
+    font-size: 0.6rem;
+    letter-spacing: 0.14em;
+    color: var(--ink-faint);
+  }
+
+  .step-title {
+    margin: 3px 0 6px;
+    font-size: 1rem;
+    font-weight: 600;
+    text-wrap: balance;
+  }
+
+  .step-instruction {
+    margin: 0;
+    font-size: var(--step);
+    color: var(--ink-dim);
+    line-height: 1.55;
+  }
+
+  .step-hint {
+    margin: 9px 0 0;
+    padding-left: 9px;
+    border-left: 2px solid var(--amber);
+    font-size: var(--step);
+    color: var(--ink-dim);
+  }
+
+  .progress-ticks {
+    display: flex;
+    gap: 3px;
+    padding: 0 11px 11px;
+  }
+
+  .tick {
+    height: 3px;
+    flex: 1;
+    background: var(--rule);
+  }
+
+  .tick.done { background: var(--ecg); }
+  .tick.now  { background: var(--amber); }
+
+  /* ---------- counters ---------- */
+
+  .counters {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .counter {
+    padding: 8px 10px 9px;
+    border-right: 1px solid var(--rule);
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .counter:nth-child(2n) { border-right: 0; }
+  .counter:nth-last-child(-n+2) { border-bottom: 0; }
+
+  .counter-value {
+    font-family: var(--mono);
+    font-size: 0.98rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
+  }
+
+  .counter-value.over { color: var(--amber); }
+
+  .meter {
+    height: 3px;
+    background: var(--rule);
+    margin-top: 5px;
+    overflow: hidden;
+  }
+
+  .meter i {
+    display: block;
+    height: 100%;
+    width: 0;
+    background: var(--ink-faint);
+    transition: width 140ms linear, background 140ms linear;
+  }
+
+  .meter i.warn { background: var(--amber); }
+  .meter i.crit { background: var(--art); }
+
+  /* ---------- controls ---------- */
+
+  .controls {
+    display: grid;
+    grid-template-columns: 1fr 200px 1fr;
+    gap: 14px;
+  }
+
+  @media (max-width: 760px) {
+    .controls { grid-template-columns: minmax(0, 1fr); }
+  }
+
+  .control-body {
+    padding: 11px;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+  }
+
+  button {
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink);
+    background: var(--console-2);
+    border: 1px solid var(--rule-bright);
+    border-radius: 2px;
+    padding: 9px 12px;
+    cursor: pointer;
+    transition: background 110ms, border-color 110ms, color 110ms;
+  }
+
+  button:hover:not(:disabled) { background: #1E252E; border-color: #475867; }
+  button:active:not(:disabled) { background: #262F3A; }
+
+  button:disabled { opacity: 0.34; cursor: not-allowed; }
+
+  button:focus-visible {
+    outline: 2px solid var(--amber);
+    outline-offset: 2px;
+  }
+
+  button.armed {
+    background: var(--amber);
+    border-color: var(--amber);
+    color: #17130A;
+    font-weight: 600;
+  }
+
+  button.danger {
+    border-color: rgba(255, 92, 87, 0.5);
+    color: var(--art);
+  }
+
+  .btn-row { display: flex; gap: 7px; }
+  .btn-row > button { flex: 1; }
+
+  .key {
+    font-size: 0.58rem;
+    color: var(--ink-faint);
+    letter-spacing: 0.08em;
+  }
+
+  /* torque dial */
+
+  .dial-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 7px;
+    padding: 11px;
+  }
+
+  #dial { display: block; }
+
+  .dial-read {
+    font-family: var(--mono);
+    font-size: 0.82rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
+  }
+
+  .dial-note {
+    font-family: var(--mono);
+    font-size: 0.58rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    text-align: center;
+    min-height: 1.2em;
+  }
+
+  .dial-note.seeking { color: var(--amber); }
+
+  /* sliders */
+
+  .slider-row {
+    display: grid;
+    grid-template-columns: 62px 1fr 56px;
+    align-items: center;
+    gap: 9px;
+    font-family: var(--mono);
+    font-size: 0.6rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+
+  .slider-row output {
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+
+  input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 3px;
+    background: var(--rule-bright);
+    border-radius: 2px;
+    outline: none;
+  }
+
+  input[type="range"]:focus-visible { box-shadow: 0 0 0 2px var(--amber); }
+
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 13px; height: 13px;
+    border-radius: 50%;
+    background: var(--ink);
+    cursor: pointer;
+  }
+
+  input[type="range"]::-moz-range-thumb {
+    width: 13px; height: 13px;
+    border: 0;
+    border-radius: 50%;
+    background: var(--ink);
+    cursor: pointer;
+  }
+
+  /* event log */
+
+  .log {
+    padding: 9px 11px 11px;
+    font-family: var(--mono);
+    font-size: 0.62rem;
+    line-height: 1.65;
+    color: var(--ink-dim);
+    max-height: 118px;
+    overflow-y: auto;
+  }
+
+  .log div { display: flex; gap: 8px; }
+  .log time { color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+  .log .bad { color: var(--art); }
+  .log .good { color: var(--ecg); }
+
+  /* ---------- debrief ---------- */
+
+  .debrief {
+    position: fixed;
+    inset: 0;
+    background: rgba(5, 7, 10, 0.9);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 22px;
+    z-index: 20;
+  }
+
+  .debrief.open { display: flex; }
+
+  .debrief-card {
+    background: var(--console);
+    border: 1px solid var(--rule-bright);
+    max-width: 560px;
+    width: 100%;
+    max-height: 86vh;
+    overflow-y: auto;
+  }
+
+  .debrief-card h2 {
+    margin: 0;
+    padding: 15px 17px 12px;
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .grade-block {
+    padding: 17px;
+    display: flex;
+    align-items: baseline;
+    gap: 13px;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .grade-score {
+    font-family: var(--mono);
+    font-size: 2.6rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    color: var(--amber);
+  }
+
+  .grade-score small { font-size: 1rem; color: var(--ink-faint); }
+
+  .grade-word { font-size: 0.95rem; color: var(--ink); }
+
+  table { width: 100%; border-collapse: collapse; font-size: var(--step); }
+
+  th, td {
+    padding: 8px 17px;
+    text-align: left;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  th {
+    font-family: var(--mono);
+    font-size: 0.56rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    font-weight: 400;
+  }
+
+  td.num {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  .debrief-foot { padding: 15px 17px; display: flex; gap: 9px; }
+
+  .disclaimer {
+    font-size: 0.7rem;
+    color: var(--ink-faint);
+    border-top: 1px solid var(--rule);
+    padding-top: 13px;
+    max-width: 72ch;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition-duration: 0.01ms !important; }
+  }
+</style>
+
+<div class="lab" id="lab">
+
+  <header class="masthead">
+    <div>
+      <h1 class="wordmark">Cardio<span>VR</span></h1>
+      <p>Diagnostic coronary angiography, right femoral access. Browser preview of the Unity trainer — same anatomy dataset, same navigation model.</p>
+    </div>
+    <p><strong style="color:var(--ink)">W</strong>/<strong style="color:var(--ink)">S</strong> advance · withdraw &nbsp; <strong style="color:var(--ink)">A</strong>/<strong style="color:var(--ink)">D</strong> torque &nbsp; <strong style="color:var(--ink)">Space</strong> screen &nbsp; <strong style="color:var(--ink)">C</strong> inject</p>
+  </header>
+
+  <div class="console">
+
+    <section class="panel" id="fluoroPanel">
+      <div class="panel-head">
+        <span>Fluoroscopy · Single plane</span>
+        <span class="xray-lamp"><i class="lamp-dot"></i> X-ray</span>
+      </div>
+      <div class="fluoro-wrap">
+        <canvas id="fluoro" width="880" height="660"></canvas>
+        <div class="overlay">
+          <div class="tl" id="ovProjection">RAO 0 · CRA 0</div>
+          <div class="tr" id="ovDose">0.0 mGy</div>
+          <div class="bl" id="ovVessel">Right common femoral artery</div>
+        </div>
+        <div class="buckle-flash"></div>
+      </div>
+    </section>
+
+    <div class="rail">
+
+      <section class="panel">
+        <div class="panel-head"><span>Patient monitor</span><span id="ovMap">MAP —</span></div>
+        <canvas id="ecg" width="640" height="148"></canvas>
+        <div class="vitals">
+          <div class="vital">
+            <div class="vital-label">HR</div>
+            <div class="vital-value v-hr" id="vHr">72</div>
+          </div>
+          <div class="vital">
+            <div class="vital-label">NIBP</div>
+            <div class="vital-value v-bp" id="vBp">128<small>/78</small></div>
+          </div>
+          <div class="vital">
+            <div class="vital-label">SpO₂</div>
+            <div class="vital-value v-spo2" id="vSpo2">98<small>%</small></div>
+          </div>
+        </div>
+        <div class="rhythm-strip" id="rhythmStrip">
+          <span id="vRhythm">Sinus rhythm</span>
+          <span id="vStability">Stable</span>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><span>Procedure</span><span id="stepTimer">0:00</span></div>
+        <div class="step-body">
+          <div class="step-counter" id="stepCounter">STEP 1 / 9</div>
+          <h2 class="step-title" id="stepTitle">Arterial access</h2>
+          <p class="step-instruction" id="stepInstruction"></p>
+          <p class="step-hint" id="stepHint"></p>
+        </div>
+        <div class="progress-ticks" id="ticks"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><span>Utilisation</span></div>
+        <div class="counters">
+          <div class="counter">
+            <div class="vital-label">Screening</div>
+            <div class="counter-value" id="cFluoro">0.0 s</div>
+            <div class="meter"><i id="mFluoro"></i></div>
+          </div>
+          <div class="counter">
+            <div class="vital-label">Contrast</div>
+            <div class="counter-value" id="cContrast">0.0 ml</div>
+            <div class="meter"><i id="mContrast"></i></div>
+          </div>
+          <div class="counter">
+            <div class="vital-label">Dose</div>
+            <div class="counter-value" id="cDose">0 mGy</div>
+            <div class="meter"><i id="mDose"></i></div>
+          </div>
+          <div class="counter">
+            <div class="vital-label">Tip resistance</div>
+            <div class="counter-value" id="cForce">0.0 N</div>
+            <div class="meter"><i id="mForce"></i></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><span>Event log</span></div>
+        <div class="log" id="log"></div>
+      </section>
+
+    </div>
+  </div>
+
+  <div class="controls">
+
+    <section class="panel">
+      <div class="panel-head"><span>Catheter</span><span id="depthRead">0.0 cm</span></div>
+      <div class="control-body">
+        <div class="btn-row">
+          <button id="btnAdvance">Advance</button>
+          <button id="btnWithdraw">Withdraw</button>
+        </div>
+        <div class="key">Hold to move. Speed drops in coronary vessels.</div>
+        <div class="btn-row">
+          <button id="btnPedal">Screen</button>
+          <button id="btnInject">Inject</button>
+        </div>
+        <div class="btn-row" id="actionRow"></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><span>Torque</span></div>
+      <div class="dial-wrap">
+        <canvas id="dial" width="128" height="128"></canvas>
+        <div class="dial-read" id="rollRead">0°</div>
+        <div class="dial-note" id="dialNote"></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><span>C-arm</span></div>
+      <div class="control-body">
+        <div class="slider-row">
+          <label for="primary">RAO/LAO</label>
+          <input type="range" id="primary" min="-90" max="90" value="0" step="1">
+          <output id="outPrimary">0°</output>
+        </div>
+        <div class="slider-row">
+          <label for="secondary">CAU/CRA</label>
+          <input type="range" id="secondary" min="-40" max="40" value="0" step="1">
+          <output id="outSecondary">0°</output>
+        </div>
+        <div class="key">Angulation separates overlapping vessels — and raises dose.</div>
+        <button id="btnRestart">Restart case</button>
+      </div>
+    </section>
+
+  </div>
+
+  <p class="disclaimer">
+    <strong>Training use only.</strong> The anatomy and physiology here are schematic models tuned to teach
+    recognition, sequencing and handling. They are not derived from patient imaging, have not been clinically
+    validated, and must not be used to guide the care of any real patient.
+  </p>
+
+</div>
+
+<div class="debrief" id="debrief">
+  <div class="debrief-card">
+    <h2>Debrief</h2>
+    <div class="grade-block">
+      <div class="grade-score" id="dScore">0<small>/100</small></div>
+      <div>
+        <div class="grade-word" id="dGrade">—</div>
+        <div class="step-counter" id="dTime">TOTAL 0:00</div>
+      </div>
+    </div>
+    <table>
+      <thead><tr><th>Metric</th><th>Result</th><th>Target</th><th class="num">Points</th></tr></thead>
+      <tbody id="dRows"></tbody>
+    </table>
+    <div class="debrief-foot">
+      <button id="btnAgain" class="armed">Run again</button>
+      <button id="btnClose">Close</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  "use strict";
+
+  /* ============================== anatomy ============================== */
+
+  const ANATOMY = {
+    accessSegmentId: "femoral_r",
+    segments: [
+      { id:"femoral_r", displayName:"Right common femoral artery", parentId:"", branchPointOnParent:1, ostiumRoll:0, tol:180, r:4.0, tort:0.05, sten:0, coronary:false,
+        cl:[[-4,-60,0],[-4,-54,0],[-4.2,-48,0.2]] },
+      { id:"iliac_r", displayName:"Right common iliac artery", parentId:"femoral_r", branchPointOnParent:1, ostiumRoll:0, tol:180, r:4.5, tort:0.25, sten:0, coronary:false,
+        cl:[[-4.2,-48,0.2],[-3,-44,0.4],[-1.2,-40,0.2]] },
+      { id:"aorta_abdominal", displayName:"Abdominal aorta", parentId:"iliac_r", branchPointOnParent:1, ostiumRoll:0, tol:180, r:9, tort:0.05, sten:0, coronary:false,
+        cl:[[-1.2,-40,0.2],[-0.4,-30,0],[0,-18,0]] },
+      { id:"aorta_thoracic", displayName:"Descending thoracic aorta", parentId:"aorta_abdominal", branchPointOnParent:1, ostiumRoll:0, tol:180, r:11, tort:0.1, sten:0, coronary:false,
+        cl:[[0,-18,0],[0.3,-11,-0.5],[0.6,-4,-1.2]] },
+      { id:"aortic_arch", displayName:"Aortic arch", parentId:"aorta_thoracic", branchPointOnParent:1, ostiumRoll:0, tol:180, r:13, tort:0.45, sten:0, coronary:false,
+        cl:[[0.6,-4,-1.2],[1.4,1,-2],[0.8,3.2,-0.4],[-0.2,2.6,1.2],[-0.1,0.6,1.4]] },
+      { id:"aortic_root", displayName:"Aortic root", parentId:"aortic_arch", branchPointOnParent:1, ostiumRoll:0, tol:180, r:15, tort:0.15, sten:0, coronary:false,
+        cl:[[-0.1,0.6,1.4],[-0.05,-0.4,1.5],[0,-1.4,1.5]] },
+      { id:"left_main", short:"LM", displayName:"Left main coronary artery", parentId:"aortic_root", branchPointOnParent:0.55, ostiumRoll:300, tol:22, r:2.25, tort:0.1, sten:0, coronary:true,
+        cl:[[0.4,-0.9,1.4],[1.6,-1.2,1.1],[2.6,-1.5,0.8]] },
+      { id:"lad", short:"LAD", displayName:"Left anterior descending artery", parentId:"left_main", branchPointOnParent:1, ostiumRoll:30, tol:28, r:1.75, tort:0.3, sten:0.55, coronary:true,
+        cl:[[2.6,-1.5,0.8],[3.6,-3.4,1.8],[4.4,-6,2.4],[4.8,-8.8,2.2]] },
+      { id:"diagonal_1", short:"D1", displayName:"First diagonal branch", parentId:"lad", branchPointOnParent:0.35, ostiumRoll:95, tol:18, r:1.1, tort:0.35, sten:0, coronary:true,
+        cl:[[3.7,-3.7,1.9],[5,-4.8,1.4],[6,-6,0.9]] },
+      { id:"lcx", short:"LCx", displayName:"Left circumflex artery", parentId:"left_main", branchPointOnParent:1, ostiumRoll:205, tol:26, r:1.6, tort:0.4, sten:0.2, coronary:true,
+        cl:[[2.6,-1.5,0.8],[3.6,-2.4,-0.6],[4.2,-4.2,-1.8],[4,-6.2,-2.6]] },
+      { id:"om_1", short:"OM1", displayName:"First obtuse marginal", parentId:"lcx", branchPointOnParent:0.5, ostiumRoll:150, tol:18, r:1.1, tort:0.4, sten:0, coronary:true,
+        cl:[[3.9,-3.3,-1.2],[5.1,-4.6,-1.8],[5.8,-6.2,-2.2]] },
+      { id:"rca_prox", short:"RCA", displayName:"Right coronary artery, proximal", parentId:"aortic_root", branchPointOnParent:0.3, ostiumRoll:70, tol:22, r:2, tort:0.15, sten:0, coronary:true,
+        cl:[[-0.5,-0.2,1.7],[-1.8,-1.4,1.9],[-2.6,-3,1.6]] },
+      { id:"rca_mid", short:"RCA mid", displayName:"Right coronary artery, mid", parentId:"rca_prox", branchPointOnParent:1, ostiumRoll:70, tol:60, r:1.8, tort:0.35, sten:0.35, coronary:true,
+        cl:[[-2.6,-3,1.6],[-3.2,-5.2,0.6],[-3,-7,-0.8]] },
+      { id:"pda", short:"PDA", displayName:"Posterior descending artery", parentId:"rca_mid", branchPointOnParent:1, ostiumRoll:250, tol:24, r:1.2, tort:0.3, sten:0, coronary:true,
+        cl:[[-3,-7,-0.8],[-1.6,-8.4,-0.4],[-0.4,-9.6,0.4]] }
+    ]
+  };
+
+  const PROCEDURE = {
+    targetFluoro: 240, targetContrast: 70, targetDose: 600,
+    steps: [
+      { title:"Arterial access", goal:"access",
+        instruction:"Puncture the right common femoral artery and place the sheath. Ease off as the needle enters — pushing through provokes a vagal response.",
+        hint:"Hold ACCESS until the gauge sits in the green band, then release.", par:120 },
+      { title:"Advance to the aortic root", goal:"reach", target:"aortic_root",
+        instruction:"Track the catheter up the iliac and aorta, over the arch, and into the root.",
+        hint:"The arch is the tortuous part — resistance climbs as you go.", par:90 },
+      { title:"Set the LAO cranial projection", goal:"projection", primary:40, secondary:20, tol:12,
+        instruction:"Angulate the C-arm to LAO 40 / cranial 20 before engaging the left system.",
+        hint:"This projection opens the left main bifurcation.", par:40 },
+      { title:"Engage the left main", goal:"engage", target:"left_main",
+        instruction:"Torque the catheter toward the left coronary cusp and engage the left main ostium.",
+        hint:"Withdraw slowly until the torque dial lights — that is the tip finding the cusp — then torque counter-clockwise and nudge forward.", par:120 },
+      { title:"Image the left system", goal:"contrast", ml:7,
+        instruction:"Inject contrast and record the left coronary run.",
+        hint:"A short firm injection opacifies better than a long weak one.", par:60 },
+      { title:"Engage the right coronary", goal:"engage", target:"rca_prox",
+        instruction:"Disengage, reposition in the root and engage the right coronary ostium.",
+        hint:"Withdraw further back in the root than the left main, then torque clockwise until the dial lights.", par:120 },
+      { title:"Image the right system", goal:"contrast", ml:6,
+        instruction:"Inject contrast and record the right coronary run.",
+        hint:"", par:60 },
+      { title:"Withdraw the catheter", goal:"withdraw",
+        instruction:"Disengage and withdraw the catheter back to the access site.",
+        hint:"", par:60 },
+      { title:"Haemostasis", goal:"hemostasis",
+        instruction:"Remove the sheath and hold pressure until the arteriotomy is sealed.",
+        hint:"Hold PRESSURE for a full ten seconds.", par:120 }
+    ]
+  };
+
+  const CATHETER = { frenchSize: 5, stiffness: 1, torqueResponse: 1 };
+  const CATH_RADIUS_MM = CATHETER.frenchSize / 6;
+
+  /* ============================== baking ============================== */
+
+  const byId = new Map();
+  const childrenOf = new Map();
+
+  for (const s of ANATOMY.segments) {
+    s.arc = [0];
+    for (let i = 1; i < s.cl.length; i++) {
+      const a = s.cl[i - 1], b = s.cl[i];
+      s.arc.push(s.arc[i - 1] + Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]));
+    }
+    s.length = s.arc[s.arc.length - 1];
+    byId.set(s.id, s);
+  }
+
+  for (const s of ANATOMY.segments) {
+    if (!s.parentId) continue;
+    if (!childrenOf.has(s.parentId)) childrenOf.set(s.parentId, []);
+    childrenOf.get(s.parentId).push(s);
+  }
+  for (const list of childrenOf.values()) list.sort((a, b) => a.branchPointOnParent - b.branchPointOnParent);
+
+  const kids = id => childrenOf.get(id) || [];
+
+  function pointAt(seg, cm) {
+    const c = Math.max(0, Math.min(cm, seg.length));
+    let i = 0;
+    while (i < seg.arc.length - 2 && seg.arc[i + 1] <= c) i++;
+    const span = seg.arc[i + 1] - seg.arc[i];
+    const t = span > 1e-6 ? (c - seg.arc[i]) / span : 0;
+    const a = seg.cl[i], b = seg.cl[i + 1];
+    return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+  }
+
+  function lumenAt(seg, cm) {
+    if (!seg.sten) return seg.r;
+    const mid = seg.length / 2;
+    const spread = Math.max(seg.length * 0.15, 0.5);
+    return seg.r * (1 - seg.sten * Math.exp(-Math.pow((cm - mid) / spread, 2)));
+  }
+
+  function descendants(id, acc = new Set()) {
+    acc.add(id);
+    for (const c of kids(id)) descendants(c.id, acc);
+    return acc;
+  }
+
+  /* ============================== state ============================== */
+
+  let S;
+
+  function reset() {
+    S = {
+      path: [ANATOMY.accessSegmentId],
+      tipDepth: 0,
+      roll: 0,
+      resistance: 0,
+      buckling: false,
+      buckleFlash: 0,
+
+      hr: 72, sys: 128, dia: 78, spo2: 98,
+      tHr: 72, tSys: 128, tDia: 78,
+      rhythm: "Sinus rhythm",
+      unstable: false,
+
+      screening: false,
+      fluoroSec: 0,
+      dose: 0,
+      contrast: 0,
+      injecting: false,
+      injectionMl: 0,
+      opacity: 0,
+      opacified: new Set(),
+
+      primary: 0, secondary: 0,
+
+      trauma: new Map(),
+      dissected: new Set(),
+      coronaryDwell: 0,
+      bloodLoss: 0,
+      complications: [],
+
+      stepIndex: 0,
+      stepStart: 0,
+      slowSteps: 0,
+      accessDone: false,
+      hemostasisDone: false,
+      accessForce: 0,
+      accessHolding: false,
+      pressureHeld: 0,
+      contrastAtStep: 0,
+
+      elapsed: 0,
+      finished: false,
+      log: [],
+      ecgPhase: 0,
+      ecgTrace: new Array(320).fill(0),
+      viewFov: 46,
+      viewCenter: [0, -30, 0]
+    };
+    document.getElementById("log").innerHTML = "";
+    logEvent("Case started · 62M, exertional chest pain", "good");
+  }
+
+  const tipSeg = () => byId.get(S.path[S.path.length - 1]);
+
+  function insertedLength() {
+    let total = S.tipDepth;
+    for (let i = 0; i < S.path.length - 1; i++) {
+      const parent = byId.get(S.path[i]);
+      const child = byId.get(S.path[i + 1]);
+      total += child.branchPointOnParent * parent.length;
+    }
+    return total;
+  }
+
+  /* ============================== navigation ============================== */
+
+  function stepCatheter(advanceCm, rollDelta) {
+    S.roll = (S.roll + rollDelta + 360) % 360;
+    S.buckling = false;
+
+    if (advanceCm > 0) advance(advanceCm);
+    else if (advanceCm < 0) withdraw(-advanceCm);
+
+    S.resistance = computeResistance(advanceCm);
+
+    if (advanceCm !== 0) {
+      const seg = tipSeg();
+      const clearance = lumenAt(seg, S.tipDepth) - CATH_RADIUS_MM;
+      if (clearance < 0) wallContact(seg, -clearance);
+    }
+  }
+
+  function rollAligned(child) {
+    let d = Math.abs(((S.roll - child.ostiumRoll + 540) % 360) - 180);
+    return d <= child.tol * CATHETER.torqueResponse;
+  }
+
+  function advance(remaining) {
+    for (let guard = 0; guard < 32 && remaining > 0; guard++) {
+      const cur = tipSeg();
+      const target = S.tipDepth + remaining;
+      let entered = null, branchCm = 0;
+
+      for (const child of kids(cur.id)) {
+        const cm = child.branchPointOnParent * cur.length;
+        if (cm < S.tipDepth || cm > target) continue;
+        if (!rollAligned(child)) continue;
+        if (CATH_RADIUS_MM > child.r) continue;
+        entered = child; branchCm = cm; break;
+      }
+
+      if (entered) {
+        remaining -= branchCm - S.tipDepth;
+        S.path.push(entered.id);
+        S.tipDepth = 0;
+        onSegmentEntered(entered);
+        continue;
+      }
+
+      if (target <= cur.length) { S.tipDepth = target; return; }
+
+      S.tipDepth = cur.length;
+      if (!S.buckling) onBuckle();
+      S.buckling = true;
+      return;
+    }
+  }
+
+  function withdraw(remaining) {
+    while (remaining > 0) {
+      if (S.tipDepth >= remaining) { S.tipDepth -= remaining; return; }
+      remaining -= S.tipDepth;
+      if (S.path.length === 1) { S.tipDepth = 0; return; }
+      const child = tipSeg();
+      S.path.pop();
+      const parent = tipSeg();
+      S.tipDepth = child.branchPointOnParent * parent.length;
+      if (child.coronary) logEvent("Disengaged " + child.displayName);
+    }
+  }
+
+  function computeResistance(advanceCm) {
+    if (S.buckling) return 9 * CATHETER.stiffness;
+    let f = insertedLength() * 0.012;
+    let tort = 0;
+    for (const id of S.path) tort += byId.get(id).tort;
+    f += tort * 3.5 * CATHETER.stiffness;
+    const seg = tipSeg();
+    const clearance = lumenAt(seg, S.tipDepth) - CATH_RADIUS_MM;
+    if (clearance < 0) f += -clearance * 6;
+    return advanceCm >= 0 ? f : f * 0.75;
+  }
+
+  function onSegmentEntered(seg) {
+    if (seg.coronary) { S.coronaryDwell = 0; logEvent("Engaged " + seg.displayName, "good"); }
+  }
+
+  function onBuckle() {
+    S.buckleFlash = 0.28;
+    const id = tipSeg().id;
+    S.trauma.set(id, (S.trauma.get(id) || 0) + 0.15);
+  }
+
+  /* ============================== complications ============================== */
+
+  function wallContact(seg, overlapMm, dt) {
+    const delta = overlapMm * (dt || 0.016) * (1 + seg.tort);
+    const trauma = (S.trauma.get(seg.id) || 0) + delta;
+    S.trauma.set(seg.id, trauma);
+
+    if (trauma > 2.2) {
+      S.bloodLoss += 140;
+      raise("Perforation", seg.displayName, Math.min(1, trauma / 2.2));
+    } else if (trauma > 1.0 && !S.dissected.has(seg.id)) {
+      S.dissected.add(seg.id);
+      raise("Vessel dissection", seg.displayName, Math.min(1, trauma / 2.2));
+      if (seg.coronary) ischaemia(0.55);
+    }
+  }
+
+  let lastComplicationAt = -99;
+
+  function raise(type, where, severity) {
+    // Rate-limit the same insult firing every frame while contact persists.
+    const key = type + where;
+    if (S.complications.length && S.complications[S.complications.length - 1].key === key
+        && S.elapsed - lastComplicationAt < 4) return;
+    lastComplicationAt = S.elapsed;
+    S.complications.push({ key, type, where, severity, at: S.elapsed });
+    logEvent(type + " — " + where, "bad");
+  }
+
+  function ischaemia(sev) {
+    sev = Math.max(0, Math.min(1, sev));
+    S.tSys = lerp(S.tSys, 78, sev);
+    S.tHr = lerp(S.tHr, 118, sev);
+    if (sev > 0.8) setRhythm("Ventricular fibrillation");
+    else if (sev > 0.5) setRhythm("Ventricular ectopy");
+  }
+
+  function setRhythm(r) {
+    if (S.rhythm === r) return;
+    S.rhythm = r;
+    logEvent("Rhythm: " + r, r === "Sinus rhythm" ? "good" : "bad");
+  }
+
+  /* ============================== simulation loop ============================== */
+
+  const keys = new Set();
+  const held = { advance: false, withdraw: false, pedal: false, inject: false, access: false, pressure: false };
+
+  let last = performance.now();
+
+  function tick(now) {
+    const dt = Math.min((now - last) / 1000, 0.05);
+    last = now;
+
+    if (!S.finished) {
+      S.elapsed += dt;
+      simulate(dt);
+    }
+
+    drawFluoro();
+    drawEcg(dt);
+    drawDial();
+    syncUi();
+
+    requestAnimationFrame(tick);
+  }
+
+  function simulate(dt) {
+    /* --- catheter --- */
+    const seg = tipSeg();
+    const atCusp = nearestOstium() !== null;
+    const speed = seg.coronary ? 1.6 : atCusp ? 1.8 : (seg.r > 6 ? 9 : 5);
+    let adv = 0;
+    if (S.accessDone) {
+      if (held.advance || keys.has("w")) adv += speed * dt;
+      if (held.withdraw || keys.has("s")) adv -= speed * dt;
+    }
+
+    let roll = 0;
+    if (keys.has("d")) roll += 95 * dt;
+    if (keys.has("a")) roll -= 95 * dt;
+    roll += dialDrag * 1;
+    dialDrag = 0;
+
+    if (adv !== 0 || roll !== 0) stepCatheter(adv, roll);
+
+    // Persistent wall contact while parked in a tight lumen.
+    const clearance = lumenAt(seg, S.tipDepth) - CATH_RADIUS_MM;
+    if (clearance < 0) wallContact(seg, -clearance, dt);
+
+    S.buckleFlash = Math.max(0, S.buckleFlash - dt);
+
+    /* --- ostial dwell --- */
+    if (seg.coronary) {
+      S.coronaryDwell += dt;
+      if (S.coronaryDwell > 20) {
+        const sev = Math.min(1, (S.coronaryDwell - 20) / 25);
+        ischaemia(sev);
+        raise("Coronary damping", seg.displayName, sev);
+      }
+    } else {
+      S.coronaryDwell = Math.max(0, S.coronaryDwell - dt * 2);
+    }
+
+    /* --- screening --- */
+    S.screening = held.pedal || keys.has(" ");
+    if (S.screening) {
+      S.fluoroSec += dt;
+      const steep = (Math.abs(S.primary) + Math.abs(S.secondary)) / 90;
+      S.dose += 1.8 * (1 + steep * 0.9) * dt;
+    }
+
+    /* --- contrast --- */
+    const wantInject = held.inject || keys.has("c");
+    if (wantInject && !S.injecting) { S.injecting = true; S.injectionMl = 0; }
+    if (S.injecting && wantInject) {
+      const d = 4 * dt;
+      S.injectionMl += d;
+      S.contrast += d;
+      S.opacity = Math.min(1, S.opacity + dt * 3.2);
+      S.opacified = descendants(tipSeg().id);
+    }
+    if (S.injecting && !wantInject) {
+      S.injecting = false;
+      contrastBolus(S.injectionMl);
+      if (S.injectionMl > 0.4) logEvent("Injected " + S.injectionMl.toFixed(1) + " ml contrast");
+      S.injectionMl = 0;
+    }
+    if (!S.injecting) S.opacity = Math.max(0, S.opacity - dt * 0.85);
+
+    /* --- access & haemostasis mini-tasks --- */
+    if (currentStep() && currentStep().goal === "access") {
+      if (held.access || keys.has("f")) {
+        S.accessForce += dt * 5.5;
+        S.accessHolding = true;
+      } else if (S.accessHolding) {
+        S.accessHolding = false;
+        if (S.accessForce >= 4 && S.accessForce <= 7) {
+          S.accessDone = true;
+          logEvent("Sheath placed — clean arterial access", "good");
+        } else if (S.accessForce > 7) {
+          const sev = Math.min(1, (S.accessForce - 7) / 6);
+          S.tHr = lerp(72, 38, sev); S.tSys = lerp(128, 70, sev); S.tDia = lerp(78, 44, sev);
+          setRhythm("Sinus bradycardia");
+          raise("Vasovagal reaction", "access site", sev);
+          S.accessForce = 0;
+        } else {
+          logEvent("Needle withdrawn short of the artery");
+          S.accessForce = 0;
+        }
+      }
+    }
+
+    if (currentStep() && currentStep().goal === "hemostasis") {
+      if (held.pressure || keys.has("f")) {
+        S.pressureHeld += dt;
+        if (S.pressureHeld >= 10) { S.hemostasisDone = true; logEvent("Haemostasis achieved", "good"); }
+      } else {
+        S.pressureHeld = Math.max(0, S.pressureHeld - dt * 1.5);
+      }
+    }
+
+    /* --- haemodynamics --- */
+    if (S.bloodLoss > 0) {
+      const load = Math.min(1, S.bloodLoss / 900);
+      S.tSys = lerp(128, 64, load);
+      S.tDia = lerp(78, 40, load);
+      S.tHr = lerp(72, 132, load);
+      if (load > 0.5) setRhythm("Sinus tachycardia");
+    }
+
+    const k = 0.35 * dt;
+    S.hr += (S.tHr - S.hr) * k;
+    S.sys += (S.tSys - S.sys) * k;
+    S.dia += (S.tDia - S.dia) * k;
+
+    const map = S.dia + (S.sys - S.dia) / 3;
+    S.spo2 = lerp(S.spo2, map < 60 ? 91 : 98, 0.4 * dt);
+    S.unstable = map < 60 || S.rhythm === "Ventricular fibrillation" || S.rhythm === "Ventricular tachycardia";
+
+    /* --- view framing --- */
+    const targetFov = seg.coronary ? 13 : (S.path.length > 4 ? 26 : 46);
+    S.viewFov = lerp(S.viewFov, targetFov, 1.8 * dt);
+    const tip = pointAt(seg, S.tipDepth);
+    const targetCenter = seg.coronary ? [0.4, -3.2, 0.6] : tip;
+    for (let i = 0; i < 3; i++) S.viewCenter[i] = lerp(S.viewCenter[i], targetCenter[i], 1.8 * dt);
+
+    checkStep();
+  }
+
+  function contrastBolus(ml) {
+    const load = Math.min(1, ml / 12);
+    S.tHr -= 14 * load;
+    S.tSys -= 18 * load;
+    if (load > 0.85) setRhythm("Ventricular ectopy");
+    if (ml > 10) raise("Contrast-induced arrhythmia", tipSeg().displayName, Math.min(1, (ml - 10) / 8));
+    // Transient — pressure recovers.
+    setTimeout(() => { if (!S.finished && S.bloodLoss === 0 && !S.unstable) { S.tHr = 72; S.tSys = 128; S.tDia = 78; } }, 4200);
+  }
+
+  const lerp = (a, b, t) => a + (b - a) * Math.max(0, Math.min(1, t));
+
+  /* ============================== procedure ============================== */
+
+  const currentStep = () => PROCEDURE.steps[S.stepIndex] || null;
+
+  function checkStep() {
+    const step = currentStep();
+    if (!step) return;
+
+    let met = false;
+    switch (step.goal) {
+      case "access":     met = S.accessDone; break;
+      case "reach":
+      case "engage":     met = tipSeg().id === step.target; break;
+      case "projection": met = Math.abs(S.primary - step.primary) <= step.tol
+                            && Math.abs(S.secondary - step.secondary) <= step.tol; break;
+      case "contrast":   met = S.contrast - S.contrastAtStep >= step.ml; break;
+      case "withdraw":   met = tipSeg().id === ANATOMY.accessSegmentId && S.tipDepth <= 0.5; break;
+      case "hemostasis": met = S.hemostasisDone; break;
+    }
+
+    if (!met) return;
+
+    const elapsed = S.elapsed - S.stepStart;
+    if (step.par && elapsed > step.par) S.slowSteps++;
+    logEvent("✓ " + step.title, "good");
+
+    S.stepIndex++;
+    S.stepStart = S.elapsed;
+    S.contrastAtStep = S.contrast;
+
+    if (S.stepIndex >= PROCEDURE.steps.length) finish();
+    else renderStep();
+  }
+
+  function finish() {
+    S.finished = true;
+    S.screening = false;
+    renderStep();
+    showDebrief();
+  }
+
+  /* ============================== scoring ============================== */
+
+  const PENALTY = {
+    "Perforation": 30, "Air embolism": 30, "Vessel dissection": 20,
+    "Coronary damping": 12, "Contrast-induced arrhythmia": 10, "Vasovagal reaction": 8
+  };
+
+  function scoreLines() {
+    const band = (actual, target, max) => {
+      const ratio = target > 0 ? actual / target : 0;
+      if (ratio <= 1) return max;
+      return Math.round(Math.max(0, Math.min(1, (2 - ratio))) * max);
+    };
+
+    let penalty = 0;
+    for (const c of S.complications) penalty += c.severity * (PENALTY[c.type] || 5);
+
+    return [
+      { m: "Fluoroscopy time", a: S.fluoroSec.toFixed(1) + " s", t: "≤ 240 s",
+        p: band(S.fluoroSec, PROCEDURE.targetFluoro, 20), max: 20 },
+      { m: "Contrast volume", a: S.contrast.toFixed(1) + " ml", t: "≤ 70 ml",
+        p: band(S.contrast, PROCEDURE.targetContrast, 20), max: 20 },
+      { m: "Radiation dose", a: Math.round(S.dose) + " mGy", t: "≤ 600 mGy",
+        p: band(S.dose, PROCEDURE.targetDose, 15), max: 15 },
+      { m: "Complications", a: S.complications.length ? S.complications.length + " event(s)" : "none", t: "none",
+        p: Math.max(0, Math.min(30, 30 - Math.round(penalty))), max: 30 },
+      { m: "Steps completed", a: "0 skipped", t: "0 skipped", p: 10, max: 10 },
+      { m: "Pace", a: S.slowSteps + " over par", t: "0 over par",
+        p: Math.max(0, 5 - S.slowSteps), max: 5 }
+    ];
+  }
+
+  function grade(score) {
+    const major = S.complications.some(c => c.type === "Perforation" || c.type === "Air embolism" || c.severity > 0.7);
+    if (major) return score >= 70 ? "Borderline — major complication" : "Unsatisfactory";
+    if (score >= 90) return "Excellent";
+    if (score >= 75) return "Competent";
+    if (score >= 60) return "Needs practice";
+    return "Unsatisfactory";
+  }
+
+  /* ============================== projection & drawing ============================== */
+
+  const fluoro = document.getElementById("fluoro");
+  const fx = fluoro.getContext("2d");
+
+  function project(p) {
+    const a = S.primary * Math.PI / 180;
+    const b = S.secondary * Math.PI / 180;
+    const x = p[0] - S.viewCenter[0], y = p[1] - S.viewCenter[1], z = p[2] - S.viewCenter[2];
+
+    const x1 = x * Math.cos(a) + z * Math.sin(a);
+    const z1 = -x * Math.sin(a) + z * Math.cos(a);
+    const y2 = y * Math.cos(b) - z1 * Math.sin(b);
+
+    const scale = fluoro.height / S.viewFov;
+    return [fluoro.width / 2 + x1 * scale, fluoro.height / 2 - y2 * scale, scale];
+  }
+
+  function drawFluoro() {
+    const W = fluoro.width, H = fluoro.height;
+
+    const grad = fx.createRadialGradient(W / 2, H / 2, H * 0.1, W / 2, H / 2, H * 0.78);
+    grad.addColorStop(0, "#D2D0C9");
+    grad.addColorStop(1, "#A5A39B");
+    fx.fillStyle = grad;
+    fx.fillRect(0, 0, W, H);
+
+    // Soft thoracic shadow so the field reads as a radiograph, not a diagram.
+    fx.save();
+    fx.globalAlpha = 0.16;
+    fx.fillStyle = "#5E5C55";
+    fx.beginPath();
+    fx.ellipse(W * 0.5, H * 0.55, W * 0.31, H * 0.36, 0, 0, Math.PI * 2);
+    fx.fill();
+    fx.restore();
+
+    fx.lineCap = "round";
+    fx.lineJoin = "round";
+
+    const opac = S.opacity;
+    const litSet = S.opacified;
+
+    for (const seg of ANATOMY.segments) {
+      const lit = litSet.has(seg.id) ? opac : 0;
+
+      // Unopacified vessels are barely there — you cannot navigate what you have not filled.
+      const base = seg.coronary ? 0.05 : 0.13;
+      const alpha = base + lit * 0.82;
+      if (alpha < 0.02) continue;
+
+      // One filled outline per vessel rather than many strokes: overlapping
+      // translucent caps would otherwise bead along the wall, and a filled
+      // outline lets a stenosis read as a true narrowing.
+      const N = 40;
+      const pts = [], half = [];
+      for (let i = 0; i <= N; i++) {
+        const cm = seg.length * i / N;
+        const pr = project(pointAt(seg, cm));
+        pts.push(pr);
+        half.push(Math.max(0.6, lumenAt(seg, cm) / 10 * pr[2]));
+      }
+
+      const left = [], right = [];
+      for (let i = 0; i <= N; i++) {
+        const a = pts[Math.max(0, i - 1)], b = pts[Math.min(N, i + 1)];
+        let dx = b[0] - a[0], dy = b[1] - a[1];
+        const len = Math.hypot(dx, dy) || 1;
+        const px = -dy / len * half[i], py = dx / len * half[i];
+        left.push([pts[i][0] + px, pts[i][1] + py]);
+        right.push([pts[i][0] - px, pts[i][1] - py]);
+      }
+
+      fx.fillStyle = "rgba(20, 22, 26," + alpha.toFixed(3) + ")";
+      fx.beginPath();
+      fx.moveTo(left[0][0], left[0][1]);
+      for (let i = 1; i <= N; i++) fx.lineTo(left[i][0], left[i][1]);
+      fx.arc(pts[N][0], pts[N][1], half[N], 0, Math.PI * 2);
+      for (let i = N; i >= 0; i--) fx.lineTo(right[i][0], right[i][1]);
+      fx.closePath();
+      fx.fill();
+    }
+
+    // Catheter: radiopaque, always visible.
+    const cath = [];
+    for (let i = 0; i < S.path.length; i++) {
+      const seg = byId.get(S.path[i]);
+      const end = i === S.path.length - 1
+        ? S.tipDepth
+        : byId.get(S.path[i + 1]).branchPointOnParent * seg.length;
+      const stepCm = Math.max(end / 22, 0.05);
+      for (let cm = 0; cm <= end; cm += stepCm) cath.push(project(pointAt(seg, cm)));
+      cath.push(project(pointAt(seg, end)));
+    }
+
+    if (cath.length > 1) {
+      fx.strokeStyle = "rgba(12, 13, 16, 0.94)";
+      fx.lineWidth = Math.max(1.6, CATH_RADIUS_MM * 2 / 10 * cath[0][2]);
+      fx.beginPath();
+      fx.moveTo(cath[0][0], cath[0][1]);
+      for (let i = 1; i < cath.length; i++) fx.lineTo(cath[i][0], cath[i][1]);
+      fx.stroke();
+
+      const tip = cath[cath.length - 1];
+      fx.fillStyle = S.buckling ? "#B4302B" : "#0C0D10";
+      fx.beginPath();
+      fx.arc(tip[0], tip[1], Math.max(2.6, fx.lineWidth * 0.9), 0, Math.PI * 2);
+      fx.fill();
+    }
+
+    // Cine grain.
+    fx.save();
+    fx.globalAlpha = 0.045;
+    for (let i = 0; i < 140; i++) {
+      fx.fillStyle = Math.random() > 0.5 ? "#fff" : "#000";
+      fx.fillRect(Math.random() * W, Math.random() * H, 2, 2);
+    }
+    fx.restore();
+
+    if (!S.screening) {
+      fx.fillStyle = "rgba(150, 148, 141, 0.72)";
+      fx.fillRect(0, 0, W, H);
+      fx.fillStyle = "#4A4842";
+      fx.font = "600 20px ui-monospace, monospace";
+      fx.textAlign = "center";
+      fx.fillText("LAST IMAGE HOLD", W / 2, H / 2);
+      fx.font = "13px ui-monospace, monospace";
+      fx.fillText("press SCREEN to activate fluoroscopy", W / 2, H / 2 + 24);
+    }
+  }
+
+  /* --- ECG --- */
+
+  const ecg = document.getElementById("ecg");
+  const ex = ecg.getContext("2d");
+
+  function beatSample(t, rhythm, wide) {
+    if (rhythm === "Ventricular fibrillation")
+      return (Math.sin(t * 47) + Math.sin(t * 31.3) * 0.7 + Math.sin(t * 71.1) * 0.5) * 0.28;
+    if (rhythm === "Asystole") return 0;
+
+    const w = wide ? 1.9 : 1;
+    if (t < 0.12) return 0.12 * Math.sin(t / 0.12 * Math.PI);          // P
+    if (t < 0.19) return 0;
+    if (t < 0.21 * w) return -0.1;                                       // Q
+    if (t < 0.25 * w) return 1.0 * (wide ? 0.72 : 1);                    // R
+    if (t < 0.29 * w) return -0.26;                                      // S
+    if (t < 0.42) return 0;
+    if (t < 0.60) return 0.2 * Math.sin((t - 0.42) / 0.18 * Math.PI);    // T
+    return 0;
+  }
+
+  let beatCount = 0;
+
+  function drawEcg(dt) {
+    const period = 60 / Math.max(25, S.hr);
+    const prev = S.ecgPhase;
+    S.ecgPhase += dt / period;
+    if (S.ecgPhase >= 1) { S.ecgPhase -= 1; beatCount++; }
+
+    const wide = S.rhythm === "Ventricular ectopy" && beatCount % 5 === 4;
+    const samples = Math.max(1, Math.round(dt * 220));
+    for (let i = 0; i < samples; i++) {
+      const ph = (prev + (S.ecgPhase - prev) * (i / samples) + 1) % 1;
+      S.ecgTrace.push(beatSample(ph, S.rhythm, wide));
+      S.ecgTrace.shift();
+    }
+
+    const W = ecg.width, H = ecg.height;
+    ex.fillStyle = "#05070A";
+    ex.fillRect(0, 0, W, H);
+
+    ex.strokeStyle = "rgba(75, 227, 154, 0.09)";
+    ex.lineWidth = 1;
+    for (let x = 0; x < W; x += 32) { ex.beginPath(); ex.moveTo(x, 0); ex.lineTo(x, H); ex.stroke(); }
+    for (let y = 0; y < H; y += 32) { ex.beginPath(); ex.moveTo(0, y); ex.lineTo(W, y); ex.stroke(); }
+
+    ex.strokeStyle = S.unstable ? "#FF5C57" : "#4BE39A";
+    ex.lineWidth = 2;
+    ex.beginPath();
+    for (let i = 0; i < S.ecgTrace.length; i++) {
+      const x = i / (S.ecgTrace.length - 1) * W;
+      const y = H * 0.62 - S.ecgTrace[i] * H * 0.42;
+      i ? ex.lineTo(x, y) : ex.moveTo(x, y);
+    }
+    ex.stroke();
+  }
+
+  /* --- torque dial --- */
+
+  const dial = document.getElementById("dial");
+  const dx = dial.getContext("2d");
+  let dialDrag = 0;
+
+  function nearestOstium() {
+    const cur = tipSeg();
+    let best = null;
+    for (const child of kids(cur.id)) {
+      const cm = child.branchPointOnParent * cur.length;
+      // Only ostia at or ahead of the tip: an ostium already passed cannot be
+      // engaged by pushing, which is the mistake the cue has to stop teaching.
+      const gap = cm - S.tipDepth;
+      if (gap < -0.12 || gap > 0.7) continue;
+      const d = Math.abs(((S.roll - child.ostiumRoll + 540) % 360) - 180);
+      if (!best || d < best.d) best = { child, d };
+    }
+    return best;
+  }
+
+  function drawDial() {
+    const W = dial.width, H = dial.height, cx = W / 2, cy = H / 2, R = 52;
+    dx.clearRect(0, 0, W, H);
+
+    const seek = nearestOstium();
+    const proximity = seek ? Math.max(0, 1 - seek.d / 90) : 0;
+
+    dx.strokeStyle = "#232C36";
+    dx.lineWidth = 8;
+    dx.beginPath();
+    dx.arc(cx, cy, R, 0, Math.PI * 2);
+    dx.stroke();
+
+    if (seek) {
+      dx.strokeStyle = "rgba(240, 178, 60," + (0.14 + proximity * 0.7).toFixed(3) + ")";
+      dx.lineWidth = 8;
+      dx.beginPath();
+      dx.arc(cx, cy, R, 0, Math.PI * 2);
+      dx.stroke();
+    }
+
+    dx.strokeStyle = "#35424F";
+    dx.lineWidth = 1;
+    for (let a = 0; a < 360; a += 30) {
+      const r = a % 90 === 0 ? 12 : 6;
+      const rad = (a - 90) * Math.PI / 180;
+      dx.beginPath();
+      dx.moveTo(cx + Math.cos(rad) * (R - 8), cy + Math.sin(rad) * (R - 8));
+      dx.lineTo(cx + Math.cos(rad) * (R - 8 - r), cy + Math.sin(rad) * (R - 8 - r));
+      dx.stroke();
+    }
+
+    const rad = (S.roll - 90) * Math.PI / 180;
+    dx.strokeStyle = seek && proximity > 0.75 ? "#F0B23C" : "#C6D2DD";
+    dx.lineWidth = 3;
+    dx.beginPath();
+    dx.moveTo(cx, cy);
+    dx.lineTo(cx + Math.cos(rad) * (R - 14), cy + Math.sin(rad) * (R - 14));
+    dx.stroke();
+
+    dx.fillStyle = "#C6D2DD";
+    dx.beginPath();
+    dx.arc(cx, cy, 4, 0, Math.PI * 2);
+    dx.fill();
+
+    const note = document.getElementById("dialNote");
+    const label = seek ? " · " + (seek.child.short || seek.child.displayName) : "";
+    if (seek && proximity > 0.82) { note.textContent = "Tip catching" + label; note.classList.add("seeking"); }
+    else if (seek && proximity > 0.4) { note.textContent = "Cusp nearby" + label; note.classList.add("seeking"); }
+    else if (seek) { note.textContent = "Searching" + label; note.classList.remove("seeking"); }
+    else { note.textContent = ""; note.classList.remove("seeking"); }
+  }
+
+  /* ============================== ui ============================== */
+
+  const $ = id => document.getElementById(id);
+
+  function logEvent(text, kind) {
+    const row = document.createElement("div");
+    const t = document.createElement("time");
+    const mm = Math.floor(S.elapsed / 60), ss = Math.floor(S.elapsed % 60);
+    t.textContent = mm + ":" + String(ss).padStart(2, "0");
+    const span = document.createElement("span");
+    span.textContent = text;
+    if (kind) span.className = kind;
+    row.append(t, span);
+    const log = $("log");
+    log.prepend(row);
+    while (log.children.length > 40) log.lastChild.remove();
+  }
+
+  function renderStep() {
+    const step = currentStep();
+    const ticks = $("ticks");
+    ticks.innerHTML = "";
+    PROCEDURE.steps.forEach((_, i) => {
+      const el = document.createElement("i");
+      el.className = "tick" + (i < S.stepIndex ? " done" : i === S.stepIndex ? " now" : "");
+      ticks.append(el);
+    });
+
+    if (!step) {
+      $("stepCounter").textContent = "COMPLETE";
+      $("stepTitle").textContent = "Case complete";
+      $("stepInstruction").textContent = "Review the debrief.";
+      $("stepHint").textContent = "";
+      $("actionRow").innerHTML = "";
+      return;
+    }
+
+    $("stepCounter").textContent = "STEP " + (S.stepIndex + 1) + " / " + PROCEDURE.steps.length;
+    $("stepTitle").textContent = step.title;
+    $("stepInstruction").textContent = step.instruction;
+    $("stepHint").textContent = step.hint || "";
+    $("stepHint").style.display = step.hint ? "" : "none";
+
+    const row = $("actionRow");
+    row.innerHTML = "";
+    if (step.goal === "access") row.append(makeHoldButton("Access", "access"));
+    if (step.goal === "hemostasis") row.append(makeHoldButton("Pressure", "pressure"));
+    if (step.goal === "projection") {
+      const b = document.createElement("button");
+      b.textContent = "Snap to LAO 40 / CRA 20";
+      b.onclick = () => {
+        $("primary").value = 40; $("secondary").value = 20;
+        S.primary = 40; S.secondary = 20;
+        $("outPrimary").textContent = "40°"; $("outSecondary").textContent = "20°";
+      };
+      row.append(b);
+    }
+  }
+
+  function makeHoldButton(label, flag) {
+    const b = document.createElement("button");
+    b.textContent = label;
+    bindHold(b, flag);
+    return b;
+  }
+
+  function bindHold(btn, flag) {
+    const down = e => { e.preventDefault(); held[flag] = true; btn.classList.add("armed"); };
+    const up = () => { held[flag] = false; btn.classList.remove("armed"); };
+    btn.addEventListener("pointerdown", down);
+    btn.addEventListener("pointerup", up);
+    btn.addEventListener("pointerleave", up);
+    btn.addEventListener("pointercancel", up);
+    btn.addEventListener("keydown", e => { if (e.key === " " || e.key === "Enter") down(e); });
+    btn.addEventListener("keyup", up);
+  }
+
+  function meter(el, value, warnAt, critAt) {
+    el.style.width = Math.min(100, value * 100) + "%";
+    el.className = value >= critAt ? "crit" : value >= warnAt ? "warn" : "";
+  }
+
+  function syncUi() {
+    $("vHr").textContent = Math.round(S.hr);
+    $("vBp").innerHTML = Math.round(S.sys) + "<small>/" + Math.round(S.dia) + "</small>";
+    $("vSpo2").innerHTML = Math.round(S.spo2) + "<small>%</small>";
+    $("vRhythm").textContent = S.rhythm;
+    $("vStability").textContent = S.unstable ? "UNSTABLE" : "Stable";
+    $("rhythmStrip").classList.toggle("alarm", S.unstable);
+    $("ovMap").textContent = "MAP " + Math.round(S.dia + (S.sys - S.dia) / 3);
+
+    $("cFluoro").textContent = S.fluoroSec.toFixed(1) + " s";
+    $("cContrast").textContent = S.contrast.toFixed(1) + " ml";
+    $("cDose").textContent = Math.round(S.dose) + " mGy";
+    $("cForce").textContent = S.resistance.toFixed(1) + " N";
+
+    $("cFluoro").classList.toggle("over", S.fluoroSec > PROCEDURE.targetFluoro);
+    $("cContrast").classList.toggle("over", S.contrast > PROCEDURE.targetContrast);
+    $("cDose").classList.toggle("over", S.dose > PROCEDURE.targetDose);
+
+    meter($("mFluoro"), S.fluoroSec / PROCEDURE.targetFluoro, 0.75, 1);
+    meter($("mContrast"), S.contrast / PROCEDURE.targetContrast, 0.75, 1);
+    meter($("mDose"), S.dose / PROCEDURE.targetDose, 0.75, 1);
+    meter($("mForce"), S.resistance / 9, 0.55, 0.85);
+
+    $("depthRead").textContent = insertedLength().toFixed(1) + " cm";
+    $("rollRead").textContent = Math.round(S.roll) + "°";
+
+    const p = S.primary, s = S.secondary;
+    $("ovProjection").textContent =
+      (p >= 0 ? "LAO " + Math.round(p) : "RAO " + Math.round(-p)) + " · " +
+      (s >= 0 ? "CRA " + Math.round(s) : "CAU " + Math.round(-s));
+    $("ovDose").textContent = S.dose.toFixed(1) + " mGy";
+    $("ovVessel").textContent = tipSeg().displayName;
+
+    $("fluoroPanel").classList.toggle("screening", S.screening);
+    $("fluoroPanel").classList.toggle("buckling", S.buckleFlash > 0);
+
+    const el = S.finished ? S.elapsed : S.elapsed - S.stepStart;
+    $("stepTimer").textContent = Math.floor(el / 60) + ":" + String(Math.floor(el % 60)).padStart(2, "0");
+  }
+
+  function showDebrief() {
+    const lines = scoreLines();
+    const total = lines.reduce((a, l) => a + l.p, 0);
+    $("dScore").innerHTML = total + "<small>/100</small>";
+    $("dGrade").textContent = grade(total);
+    $("dTime").textContent = "TOTAL " + Math.floor(S.elapsed / 60) + ":" + String(Math.floor(S.elapsed % 60)).padStart(2, "0");
+
+    const body = $("dRows");
+    body.innerHTML = "";
+    for (const l of lines) {
+      const tr = document.createElement("tr");
+      for (const [text, cls] of [[l.m, ""], [l.a, ""], [l.t, ""], [l.p + " / " + l.max, "num"]]) {
+        const td = document.createElement("td");
+        td.textContent = text;
+        if (cls) td.className = cls;
+        tr.append(td);
+      }
+      body.append(tr);
+    }
+    $("debrief").classList.add("open");
+  }
+
+  /* ============================== wiring ============================== */
+
+  bindHold($("btnAdvance"), "advance");
+  bindHold($("btnWithdraw"), "withdraw");
+  bindHold($("btnPedal"), "pedal");
+  bindHold($("btnInject"), "inject");
+
+  $("primary").addEventListener("input", e => {
+    S.primary = +e.target.value;
+    $("outPrimary").textContent = e.target.value + "°";
+  });
+  $("secondary").addEventListener("input", e => {
+    S.secondary = +e.target.value;
+    $("outSecondary").textContent = e.target.value + "°";
+  });
+
+  dial.addEventListener("pointerdown", e => {
+    dial.setPointerCapture(e.pointerId);
+    dial.dataset.dragging = "1";
+    dial.dataset.lastAngle = pointerAngle(e);
+  });
+  dial.addEventListener("pointermove", e => {
+    if (dial.dataset.dragging !== "1") return;
+    const a = pointerAngle(e);
+    let delta = a - (+dial.dataset.lastAngle);
+    if (delta > 180) delta -= 360;
+    if (delta < -180) delta += 360;
+    dialDrag += delta;
+    dial.dataset.lastAngle = a;
+  });
+  const endDrag = () => { dial.dataset.dragging = "0"; };
+  dial.addEventListener("pointerup", endDrag);
+  dial.addEventListener("pointercancel", endDrag);
+
+  function pointerAngle(e) {
+    const r = dial.getBoundingClientRect();
+    return Math.atan2(e.clientY - (r.top + r.height / 2), e.clientX - (r.left + r.width / 2)) * 180 / Math.PI;
+  }
+
+  addEventListener("keydown", e => {
+    if (["w", "a", "s", "d", "c", "f"].includes(e.key.toLowerCase()) || e.key === " ") {
+      if (e.target.tagName === "INPUT" || e.target.tagName === "BUTTON") return;
+      e.preventDefault();
+      keys.add(e.key === " " ? " " : e.key.toLowerCase());
+    }
+  });
+  addEventListener("keyup", e => keys.delete(e.key === " " ? " " : e.key.toLowerCase()));
+  addEventListener("blur", () => keys.clear());
+
+  function restart() {
+    $("debrief").classList.remove("open");
+    reset();
+    renderStep();
+  }
+
+  $("btnRestart").onclick = restart;
+  $("btnAgain").onclick = restart;
+  $("btnClose").onclick = () => $("debrief").classList.remove("open");
+
+  reset();
+  renderStep();
+  requestAnimationFrame(tick);
+})();
+</script>
