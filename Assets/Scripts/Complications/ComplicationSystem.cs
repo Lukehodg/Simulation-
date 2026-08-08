@@ -118,7 +118,7 @@ namespace CardioVR.Complications
         {
             var tip = navigator.State.TipSegmentId;
             traumaBySegment.TryGetValue(tip, out float trauma);
-            traumaBySegment[tip] = trauma + 0.15f;
+            traumaBySegment[tip] = trauma + (navigator.Stabilised ? 0.06f : 0.15f);
         }
 
         public void NotifySheathInsertion(float force)

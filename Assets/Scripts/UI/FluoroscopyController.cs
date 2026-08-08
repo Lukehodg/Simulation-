@@ -10,7 +10,6 @@ namespace CardioVR.UI
     public class FluoroscopyController : MonoBehaviour
     {
         [SerializeField] ComplicationSystem complications;
-        [SerializeField] Camera fluoroCamera;
 
         [Header("Dose")]
         [Tooltip("Reference dose rate in mGy per second of screening at 0 degrees.")]
@@ -47,15 +46,13 @@ namespace CardioVR.UI
 
         public void SetPedal(bool down) => IsScreening = down;
 
-        /// LAO/RAO is the primary angle, CRA/CAU the secondary.
+        /// LAO/RAO is the primary angle, CRA/CAU the secondary. CArmRig reads these
+        /// and slews the gantry — the beam geometry follows the hardware, not the
+        /// other way round.
         public void SetProjection(float primaryDegrees, float secondaryDegrees)
         {
             PrimaryAngleDegrees = Mathf.Clamp(primaryDegrees, -120f, 120f);
             SecondaryAngleDegrees = Mathf.Clamp(secondaryDegrees, -45f, 45f);
-
-            if (fluoroCamera != null)
-                fluoroCamera.transform.localRotation =
-                    Quaternion.Euler(SecondaryAngleDegrees, PrimaryAngleDegrees, 0f);
         }
 
         public bool MatchesProjection(float primary, float secondary, float tolerance)

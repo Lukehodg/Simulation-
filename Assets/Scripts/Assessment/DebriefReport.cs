@@ -100,17 +100,23 @@ namespace CardioVR.Assessment
             return new ScoreLine("Complications", actual, "none", points, max);
         }
 
-        static float PenaltyWeight(ComplicationType type) => type switch
+        /// How much each complication costs. Anything that puts blood or air
+        /// somewhere it should not be is scored as career-defining; the rest scale
+        /// with how recoverable they are.
+        static float PenaltyWeight(ComplicationType type)
         {
-            ComplicationType.Perforation => 30f,
-            ComplicationType.AirEmbolism => 30f,
-            ComplicationType.VesselDissection => 20f,
-            ComplicationType.CoronaryDamping => 12f,
-            ComplicationType.ContrastInducedArrhythmia => 10f,
-            ComplicationType.VasovagalReaction => 8f,
-            ComplicationType.AccessSiteBleed => 8f,
-            _ => 5f
-        };
+            switch (type)
+            {
+                case ComplicationType.Perforation: return 30f;
+                case ComplicationType.AirEmbolism: return 30f;
+                case ComplicationType.VesselDissection: return 20f;
+                case ComplicationType.CoronaryDamping: return 12f;
+                case ComplicationType.ContrastInducedArrhythmia: return 10f;
+                case ComplicationType.VasovagalReaction: return 8f;
+                case ComplicationType.AccessSiteBleed: return 8f;
+                default: return 5f;
+            }
+        }
 
         ScoreLine ScoreCompleteness()
         {

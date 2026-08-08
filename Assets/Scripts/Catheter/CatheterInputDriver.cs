@@ -16,19 +16,33 @@ namespace CardioVR.Catheter
 
         CatheterNavigator navigator;
         ICatheterInput input;
+        CatheterShaftInteractable shaft;
 
         void Awake()
         {
             navigator = GetComponent<CatheterNavigator>();
             input = inputSource as ICatheterInput;
+            shaft = inputSource as CatheterShaftInteractable;
 
             if (input == null)
                 Debug.LogError($"{nameof(inputSource)} must implement {nameof(ICatheterInput)}.", this);
         }
 
+        void OnEnable()
+        {
+            if (shaft != null) navigator.Buckled += shaft.PulseOnBuckle;
+        }
+
+        void OnDisable()
+        {
+            if (shaft != null) navigator.Buckled -= shaft.PulseOnBuckle;
+        }
+
         void FixedUpdate()
         {
             if (input == null) return;
+
+            navigator.Stabilised = shaft != null && shaft.IsStabilised;
 
             float advance = Mathf.Clamp(input.ConsumeAdvanceCm(), -maxStepCm, maxStepCm);
             float roll = input.ConsumeRollDegrees();

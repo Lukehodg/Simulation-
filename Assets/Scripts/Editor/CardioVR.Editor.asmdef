@@ -1,12 +1,13 @@
 {
-  "name": "CardioVR",
-  "rootNamespace": "CardioVR",
+  "name": "CardioVR.Editor",
+  "rootNamespace": "CardioVR.EditorTools",
   "references": [
+    "CardioVR",
     "Unity.XR.CoreUtils",
     "Unity.XR.Interaction.Toolkit",
     "Unity.InputSystem"
   ],
-  "includePlatforms": [],
+  "includePlatforms": [ "Editor" ],
   "excludePlatforms": [],
   "allowUnsafeCode": false,
   "overrideReferences": false,

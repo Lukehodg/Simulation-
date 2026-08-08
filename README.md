@@ -16,9 +16,17 @@ millilitre of contrast, and every millimetre of vessel wall you traumatise.
 The hard part of catheter work isn't knowing the steps — it's the hands. Advancing
 against resistance, torquing a shaft to rotate a tip you can only see in
 projection, and feeling when to stop. So the interaction is built around real
-motion: you grip a hub and **push, pull and twist**. Insertion is hand travel
-along the shaft axis; roll is wrist rotation about it. Resistance comes back
-through controller haptics.
+motion: you grip the shaft and **push, pull and twist**. Insertion is hand travel
+along the shaft axis; roll is wrist rotation about it.
+
+The detail that makes it VR rather than a game on a headset: your grip is a fixed
+point *on the shaft*, so pushing carries your hand toward the sheath, and when it
+arrives you have run out of travel and must **release and re-grip further back** —
+exactly as in the lab. Put a second hand on the shaft to steady it and the tip
+tracks torque more faithfully and buckles less.
+
+Stack: **Unity 2022.3 LTS · OpenXR · XR Interaction Toolkit · Quest 3 standalone**.
+See [docs/VR_SETUP.md](docs/VR_SETUP.md) for the rationale and the build steps.
 
 ## What the simulation models
 
@@ -31,6 +39,7 @@ through controller haptics.
 | **Complications** | Per-vessel trauma accumulates and converts to dissection, then perforation; ostial dwell causes damping and ischaemia; unpurged lines cause air embolism |
 | **Dose** | Screening time and cumulative mGy, with steep angulation costing more |
 | **Assessment** | Every step, complication and overrun recorded, scored out of 100 with a graded debrief |
+| **Fluoroscopy** | A real orthographic projection through additively-blended radiopaque meshes, inverted to film; grain scales inversely with dose rate, and releasing the pedal leaves last image hold |
 
 Trauma is **cumulative and does not heal**. Rough handling early costs the trainee
 later — that's the teaching point, not a bug.
@@ -54,15 +63,21 @@ Assets/
   Scenarios/
     aorto-coronary-tree.json              anatomy dataset (editable outside Unity)
     diagnostic-coronary-angiography.json  procedure script
+  Shaders/         Radiopaque, FluoroDisplay
   Scripts/
-    Vasculature/   VesselSegment, VesselNetwork, VesselNetworkLoader
-    Catheter/      CatheterState, CatheterNavigator, CatheterProfile, CatheterInputDriver
-    Interaction/   ICatheterInput, XRCatheterHandle, DesktopCatheterInput
+    Vasculature/   VesselSegment, VesselNetwork, VesselNetworkLoader, VesselMeshBuilder
+    Catheter/      CatheterState, CatheterNavigator, CatheterProfile,
+                   CatheterInputDriver, CatheterRenderer
+    Interaction/   ICatheterInput, CatheterShaftInteractable, HapticDriver,
+                   ContrastSyringe, FluoroPedal, ProjectionPresetButton,
+                   DesktopCatheterInput
     Physiology/    PatientVitals
     Complications/ ComplicationSystem
-    Core/          ProcedureDefinition, ProcedureRunner
+    Core/          ProcedureDefinition, ProcedureLoader, ProcedureRunner
     Assessment/    PerformanceRecorder, DebriefReport
-    UI/            FluoroscopyController
+    UI/            FluoroscopyController, CArmRig, PatientMonitorRenderer
+    XR/            XRSessionBootstrap
+    Editor/        CathLabBuilder
 ```
 
 The anatomy and the procedure are **data, not code** — a clinician can add a
@@ -70,28 +85,20 @@ vessel, change a stenosis, or rewrite the step list in JSON without touching C#.
 
 ## Getting started
 
-1. Open the project in **Unity 2022.3 LTS**.
-2. `Edit → Project Settings → XR Plug-in Management` → enable **OpenXR** for your
-   target, and add an interaction profile for your controllers.
-3. Create a scene with:
-   - a `CatheterNavigator` (assign the vessel network asset and a catheter profile),
-   - a `CatheterInputDriver` alongside it, pointed at either `XRCatheterHandle`
-     (VR) or `DesktopCatheterInput` (no headset — W/S advance, A/D torque),
-   - `PatientVitals`, `ComplicationSystem`, `FluoroscopyController`,
-     `PerformanceRecorder`, `ProcedureRunner` and `DebriefReport`, wired to each
-     other via their inspector fields.
-4. Press Play. Without a headset the desktop input drives the whole procedure.
+1. Open the project in **Unity 2022.3 LTS** and let packages resolve.
+2. Import the XRI **Starter Assets** sample and enable **OpenXR** — see
+   [docs/VR_SETUP.md](docs/VR_SETUP.md) for the exact settings.
+3. Run **`CardioVR → Build Cath Lab Scene`** from the menu bar.
 
-To build the network from JSON at runtime instead of an authored asset, move the
-dataset under a `Resources/` folder and call
-`VesselNetworkLoader.FromResource("aorto-coronary-tree")`.
+That generates `Assets/Scenes/CathLab.unity` with the room, the anatomy, the
+C-arm, the monitors and every component reference wired up. The scene is
+generated rather than committed because a Unity scene file is a wall of GUIDs
+nobody can review — this way the layout is code you can read in a diff, and an
+anatomy change is one menu click away from being in the scene.
 
-### Hooking up the VR handle
-
-`XRCatheterHandle` is deliberately decoupled from any specific interaction
-package. Point `handTransform` at your interactor, `shaftAxis` at the catheter
-hub, and drive `IsGripped` from your grab events (XRI's `selectEntered` /
-`selectExited`, or an equivalent). Everything else follows from hand motion.
+No headset? Swap the `CatheterInputDriver`'s input source for
+`DesktopCatheterInput` (W/S advance, A/D torque), or just open
+`preview/index.html`.
 
 ## Extending it
 
@@ -107,7 +114,7 @@ hub, and drive `IsGripped` from your grab events (XRI's `selectEntered` /
 
 ## Roadmap
 
-- Fluoroscopic rendering of the vessel tree with contrast opacification
+- Contrast opacification in the 3D fluoroscopy path (the preview already does it)
 - Guidewire-then-catheter workflow (the wire leads, the catheter follows)
 - Radial access as an alternative route, with subclavian tortuosity
 - Instructor mode: inject a complication mid-run and grade the response

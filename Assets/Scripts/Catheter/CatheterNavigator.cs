@@ -19,6 +19,10 @@ namespace CardioVR.Catheter
 
         public CatheterState State { get; } = new CatheterState();
         public VesselNetwork Network => network;
+
+        /// True while a second hand is steadying the shaft at the sheath. A
+        /// stabilised shaft transmits torque more faithfully and buckles less.
+        public bool Stabilised { get; set; }
         public VesselSegment TipSegment => network.Get(State.TipSegmentId);
 
         public event Action<VesselSegment> SegmentEntered;
@@ -111,7 +115,9 @@ namespace CardioVR.Catheter
         bool IsRollAligned(VesselSegment child)
         {
             float delta = Mathf.Abs(Mathf.DeltaAngle(State.RollDegrees, child.ostiumRollDegrees));
-            return delta <= child.ostiumRollToleranceDegrees * profile.torqueResponse;
+            float tolerance = child.ostiumRollToleranceDegrees * profile.torqueResponse;
+            if (Stabilised) tolerance *= 1.25f;
+            return delta <= tolerance;
         }
 
         void Withdraw(float remaining)
