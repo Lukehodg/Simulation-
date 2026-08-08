@@ -1,0 +1,248 @@
+{
+  "accessSegmentId": "femoral_r",
+  "notes": "Centreline coordinates are centimetres in anatomy-local space: origin at the aortic root, +y superior, +z anterior, +x patient-left. Geometry is schematic and tuned for navigation training, not derived from patient imaging.",
+  "segments": [
+    {
+      "id": "femoral_r",
+      "displayName": "Right common femoral artery",
+      "parentId": "",
+      "branchPointOnParent": 1.0,
+      "ostiumRollDegrees": 0,
+      "ostiumRollToleranceDegrees": 180,
+      "lumenRadiusMm": 4.0,
+      "tortuosity": 0.05,
+      "stenosis": 0.0,
+      "isCoronary": false,
+      "centerline": [
+        { "x": -4.0, "y": -60.0, "z": 0.0 },
+        { "x": -4.0, "y": -54.0, "z": 0.0 },
+        { "x": -4.2, "y": -48.0, "z": 0.2 }
+      ]
+    },
+    {
+      "id": "iliac_r",
+      "displayName": "Right common iliac artery",
+      "parentId": "femoral_r",
+      "branchPointOnParent": 1.0,
+      "ostiumRollDegrees": 0,
+      "ostiumRollToleranceDegrees": 180,
+      "lumenRadiusMm": 4.5,
+      "tortuosity": 0.25,
+      "stenosis": 0.0,
+      "isCoronary": false,
+      "centerline": [
+        { "x": -4.2, "y": -48.0, "z": 0.2 },
+        { "x": -3.0, "y": -44.0, "z": 0.4 },
+        { "x": -1.2, "y": -40.0, "z": 0.2 }
+      ]
+    },
+    {
+      "id": "aorta_abdominal",
+      "displayName": "Abdominal aorta",
+      "parentId": "iliac_r",
+      "branchPointOnParent": 1.0,
+      "ostiumRollDegrees": 0,
+      "ostiumRollToleranceDegrees": 180,
+      "lumenRadiusMm": 9.0,
+      "tortuosity": 0.05,
+      "stenosis": 0.0,
+      "isCoronary": false,
+      "centerline": [
+        { "x": -1.2, "y": -40.0, "z": 0.2 },
+        { "x": -0.4, "y": -30.0, "z": 0.0 },
+        { "x": 0.0, "y": -18.0, "z": 0.0 }
+      ]
+    },
+    {
+      "id": "aorta_thoracic",
+      "displayName": "Descending thoracic aorta",
+      "parentId": "aorta_abdominal",
+      "branchPointOnParent": 1.0,
+      "ostiumRollDegrees": 0,
+      "ostiumRollToleranceDegrees": 180,
+      "lumenRadiusMm": 11.0,
+      "tortuosity": 0.1,
+      "stenosis": 0.0,
+      "isCoronary": false,
+      "centerline": [
+        { "x": 0.0, "y": -18.0, "z": 0.0 },
+        { "x": 0.3, "y": -11.0, "z": -0.5 },
+        { "x": 0.6, "y": -4.0, "z": -1.2 }
+      ]
+    },
+    {
+      "id": "aortic_arch",
+      "displayName": "Aortic arch",
+      "parentId": "aorta_thoracic",
+      "branchPointOnParent": 1.0,
+      "ostiumRollDegrees": 0,
+      "ostiumRollToleranceDegrees": 180,
+      "lumenRadiusMm": 13.0,
+      "tortuosity": 0.45,
+      "stenosis": 0.0,
+      "isCoronary": false,
+      "centerline": [
+        { "x": 0.6, "y": -4.0, "z": -1.2 },
+        { "x": 1.4, "y": 1.0, "z": -2.0 },
+        { "x": 0.8, "y": 3.2, "z": -0.4 },
+        { "x": -0.2, "y": 2.6, "z": 1.2 },
+        { "x": -0.1, "y": 0.6, "z": 1.4 }
+      ]
+    },
+    {
+      "id": "aortic_root",
+      "displayName": "Aortic root",
+      "parentId": "aortic_arch",
+      "branchPointOnParent": 1.0,
+      "ostiumRollDegrees": 0,
+      "ostiumRollToleranceDegrees": 180,
+      "lumenRadiusMm": 15.0,
+      "tortuosity": 0.15,
+      "stenosis": 0.0,
+      "isCoronary": false,
+      "centerline": [
+        { "x": -0.1, "y": 0.6, "z": 1.4 },
+        { "x": -0.05, "y": -0.4, "z": 1.5 },
+        { "x": 0.0, "y": -1.4, "z": 1.5 }
+      ]
+    },
+    {
+      "id": "left_main",
+      "displayName": "Left main coronary artery",
+      "parentId": "aortic_root",
+      "branchPointOnParent": 0.55,
+      "ostiumRollDegrees": 300,
+      "ostiumRollToleranceDegrees": 22,
+      "lumenRadiusMm": 2.25,
+      "tortuosity": 0.1,
+      "stenosis": 0.0,
+      "isCoronary": true,
+      "centerline": [
+        { "x": 0.4, "y": -0.9, "z": 1.4 },
+        { "x": 1.6, "y": -1.2, "z": 1.1 },
+        { "x": 2.6, "y": -1.5, "z": 0.8 }
+      ]
+    },
+    {
+      "id": "lad",
+      "displayName": "Left anterior descending artery",
+      "parentId": "left_main",
+      "branchPointOnParent": 1.0,
+      "ostiumRollDegrees": 30,
+      "ostiumRollToleranceDegrees": 28,
+      "lumenRadiusMm": 1.75,
+      "tortuosity": 0.3,
+      "stenosis": 0.55,
+      "isCoronary": true,
+      "centerline": [
+        { "x": 2.6, "y": -1.5, "z": 0.8 },
+        { "x": 3.6, "y": -3.4, "z": 1.8 },
+        { "x": 4.4, "y": -6.0, "z": 2.4 },
+        { "x": 4.8, "y": -8.8, "z": 2.2 }
+      ]
+    },
+    {
+      "id": "diagonal_1",
+      "displayName": "First diagonal branch",
+      "parentId": "lad",
+      "branchPointOnParent": 0.35,
+      "ostiumRollDegrees": 95,
+      "ostiumRollToleranceDegrees": 18,
+      "lumenRadiusMm": 1.1,
+      "tortuosity": 0.35,
+      "stenosis": 0.0,
+      "isCoronary": true,
+      "centerline": [
+        { "x": 3.7, "y": -3.7, "z": 1.9 },
+        { "x": 5.0, "y": -4.8, "z": 1.4 },
+        { "x": 6.0, "y": -6.0, "z": 0.9 }
+      ]
+    },
+    {
+      "id": "lcx",
+      "displayName": "Left circumflex artery",
+      "parentId": "left_main",
+      "branchPointOnParent": 1.0,
+      "ostiumRollDegrees": 205,
+      "ostiumRollToleranceDegrees": 26,
+      "lumenRadiusMm": 1.6,
+      "tortuosity": 0.4,
+      "stenosis": 0.2,
+      "isCoronary": true,
+      "centerline": [
+        { "x": 2.6, "y": -1.5, "z": 0.8 },
+        { "x": 3.6, "y": -2.4, "z": -0.6 },
+        { "x": 4.2, "y": -4.2, "z": -1.8 },
+        { "x": 4.0, "y": -6.2, "z": -2.6 }
+      ]
+    },
+    {
+      "id": "om_1",
+      "displayName": "First obtuse marginal",
+      "parentId": "lcx",
+      "branchPointOnParent": 0.5,
+      "ostiumRollDegrees": 150,
+      "ostiumRollToleranceDegrees": 18,
+      "lumenRadiusMm": 1.1,
+      "tortuosity": 0.4,
+      "stenosis": 0.0,
+      "isCoronary": true,
+      "centerline": [
+        { "x": 3.9, "y": -3.3, "z": -1.2 },
+        { "x": 5.1, "y": -4.6, "z": -1.8 },
+        { "x": 5.8, "y": -6.2, "z": -2.2 }
+      ]
+    },
+    {
+      "id": "rca_prox",
+      "displayName": "Right coronary artery, proximal",
+      "parentId": "aortic_root",
+      "branchPointOnParent": 0.3,
+      "ostiumRollDegrees": 70,
+      "ostiumRollToleranceDegrees": 22,
+      "lumenRadiusMm": 2.0,
+      "tortuosity": 0.15,
+      "stenosis": 0.0,
+      "isCoronary": true,
+      "centerline": [
+        { "x": -0.5, "y": -0.2, "z": 1.7 },
+        { "x": -1.8, "y": -1.4, "z": 1.9 },
+        { "x": -2.6, "y": -3.0, "z": 1.6 }
+      ]
+    },
+    {
+      "id": "rca_mid",
+      "displayName": "Right coronary artery, mid",
+      "parentId": "rca_prox",
+      "branchPointOnParent": 1.0,
+      "ostiumRollDegrees": 70,
+      "ostiumRollToleranceDegrees": 60,
+      "lumenRadiusMm": 1.8,
+      "tortuosity": 0.35,
+      "stenosis": 0.35,
+      "isCoronary": true,
+      "centerline": [
+        { "x": -2.6, "y": -3.0, "z": 1.6 },
+        { "x": -3.2, "y": -5.2, "z": 0.6 },
+        { "x": -3.0, "y": -7.0, "z": -0.8 }
+      ]
+    },
+    {
+      "id": "pda",
+      "displayName": "Posterior descending artery",
+      "parentId": "rca_mid",
+      "branchPointOnParent": 1.0,
+      "ostiumRollDegrees": 250,
+      "ostiumRollToleranceDegrees": 24,
+      "lumenRadiusMm": 1.2,
+      "tortuosity": 0.3,
+      "stenosis": 0.0,
+      "isCoronary": true,
+      "centerline": [
+        { "x": -3.0, "y": -7.0, "z": -0.8 },
+        { "x": -1.6, "y": -8.4, "z": -0.4 },
+        { "x": -0.4, "y": -9.6, "z": 0.4 }
+      ]
+    }
+  ]
+}

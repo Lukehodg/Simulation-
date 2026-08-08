@@ -1,0 +1,78 @@
+{
+  "displayName": "Diagnostic Coronary Angiography — right femoral access",
+  "briefing": "62-year-old with exertional chest pain and a positive stress test. Right femoral access. Assess both coronary systems, then close. Keep screening time, contrast and dose to a minimum.",
+  "vesselNetworkAccessId": "femoral_r",
+  "targetFluoroSeconds": 240,
+  "targetContrastMl": 70,
+  "targetDoseMilliGray": 600,
+  "steps": [
+    {
+      "title": "Arterial access",
+      "instruction": "Puncture the right common femoral artery and place the sheath. Advance the needle smoothly — excessive force provokes a vagal response.",
+      "goal": "ObtainArterialAccess",
+      "parTimeSeconds": 120,
+      "hint": "Aim below the inguinal ligament and over the femoral head."
+    },
+    {
+      "title": "Advance to the aortic root",
+      "instruction": "Track the catheter up the iliac and aorta, over the arch, into the root.",
+      "goal": "AdvanceToSegment",
+      "targetSegmentId": "aortic_root",
+      "parTimeSeconds": 90,
+      "hint": "The arch is the tortuous part — advance in short pushes rather than one long one."
+    },
+    {
+      "title": "Set the LAO cranial projection",
+      "instruction": "Angulate the C-arm to LAO 40 / cranial 20 before engaging the left system.",
+      "goal": "SetCArmProjection",
+      "primaryAngleDegrees": 40,
+      "secondaryAngleDegrees": 20,
+      "angleToleranceDegrees": 12,
+      "parTimeSeconds": 40
+    },
+    {
+      "title": "Engage the left main",
+      "instruction": "Torque the catheter to the left coronary cusp and engage the left main ostium.",
+      "goal": "EngageOstium",
+      "targetSegmentId": "left_main",
+      "parTimeSeconds": 120,
+      "hint": "Rotate counter-clockwise from neutral. Do not sit in the ostium longer than you need — damping causes ischaemia."
+    },
+    {
+      "title": "Image the left system",
+      "instruction": "Inject contrast and record the left coronary run.",
+      "goal": "InjectContrast",
+      "minContrastMl": 7,
+      "parTimeSeconds": 60,
+      "hint": "A short, firm injection opacifies better than a long weak one, and costs less contrast."
+    },
+    {
+      "title": "Engage the right coronary",
+      "instruction": "Disengage, reposition to the right coronary cusp and engage the RCA.",
+      "goal": "EngageOstium",
+      "targetSegmentId": "rca_prox",
+      "parTimeSeconds": 120,
+      "hint": "Clockwise torque from neutral, slightly higher in the root than the left main."
+    },
+    {
+      "title": "Image the right system",
+      "instruction": "Inject contrast and record the right coronary run.",
+      "goal": "InjectContrast",
+      "minContrastMl": 6,
+      "parTimeSeconds": 60
+    },
+    {
+      "title": "Withdraw the catheter",
+      "instruction": "Disengage and withdraw the catheter back to the access site.",
+      "goal": "WithdrawCatheter",
+      "parTimeSeconds": 60
+    },
+    {
+      "title": "Haemostasis",
+      "instruction": "Remove the sheath and achieve haemostasis at the access site.",
+      "goal": "AchieveHemostasis",
+      "parTimeSeconds": 120,
+      "hint": "Hold above the arteriotomy, not on the skin puncture."
+    }
+  ]
+}
