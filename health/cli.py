@@ -126,6 +126,30 @@ def cmd_status(args, config) -> int:
     return 0
 
 
+#: Shown under a source that is not working yet. The WHOOP redirect URI is
+#: the single most common setup mistake: it has to match the registered value
+#: character for character, port and path included.
+SETUP_HINTS = {
+    "whoop": [
+        "create a free app at developer.whoop.com, then:",
+        "  redirect URI (exactly):  http://localhost:8765/callback",
+        "  scopes: read:recovery read:cycles read:sleep read:workout",
+        "          read:profile read:body_measurement offline",
+        "  offline is what gets you a refresh token — without it you",
+        "  re-authorise every hour",
+        "then: health auth whoop",
+    ],
+    "hevy": [
+        "Hevy Pro only. Copy the key from hevy.com/settings?developer",
+        "then store it as HEVY_API_KEY",
+    ],
+    "apple_health": [
+        "install Health Auto Export on the iPhone, point an automation at",
+        "iCloud Drive, then set HEALTH_APPLE_EXPORT_DIR to that folder",
+    ],
+}
+
+
 def cmd_doctor(args, config) -> int:
     print(f"root       {config.root}")
     print(f"database   {config.db_path} ({'exists' if config.db_path.exists() else 'missing'})")
@@ -142,6 +166,9 @@ def cmd_doctor(args, config) -> int:
             ok, detail = False, f"{type(exc).__name__}: {exc}"
         problems += 0 if ok else 1
         print(f"[{'ok' if ok else '--'}] {name:<14}{detail}")
+        if not ok:
+            for line in SETUP_HINTS.get(name, []):
+                print(f"     {line}")
     return 1 if problems else 0
 
 

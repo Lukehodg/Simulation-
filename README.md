@@ -57,17 +57,42 @@ health sync           # fetch everything new and load it
 health status         # what's in the database, and how fresh
 ```
 
-### WHOOP
+`health doctor` prints what each source still needs, so it is the thing to run
+when something is not working.
 
-Create a free app at [developer.whoop.com](https://developer.whoop.com) and
-register the redirect URI **exactly** as `http://localhost:8765/callback`.
-Put the client ID and secret in the Keychain as `WHOOP_CLIENT_ID` and
-`WHOOP_CLIENT_SECRET`, then run `health auth whoop`.
+### Hevy — two minutes
 
-### Hevy
+Hevy Pro only. Copy the key from `hevy.com/settings?developer`, then:
 
-Hevy Pro only. Grab the key from `hevy.com/settings?developer` and store it as
-`HEVY_API_KEY`.
+```sh
+security add-generic-password -a health -s HEVY_API_KEY -w 'your-key'
+health doctor          # should report your workout count
+health sync hevy       # pages the whole history, then follows the events feed
+```
+
+### WHOOP — ten minutes, one-time OAuth
+
+1. Sign in at [developer.whoop.com](https://developer.whoop.com) with your
+   WHOOP account and create an app (free; needs an active membership).
+2. Set the redirect URI to **exactly** `http://localhost:8765/callback`.
+   Character for character, port and path included — a mismatch is the usual
+   cause of a `redirect_uri` error, and it is the most common thing to get
+   wrong here.
+3. Request these scopes: `read:recovery read:cycles read:sleep read:workout
+   read:profile read:body_measurement offline`. The last one is what gets you
+   a refresh token; without it the connection dies after an hour.
+4. Store the credentials and run the consent flow:
+
+```sh
+security add-generic-password -a health -s WHOOP_CLIENT_ID -w 'your-id'
+security add-generic-password -a health -s WHOOP_CLIENT_SECRET -w 'your-secret'
+health auth whoop      # opens the browser; approve; tokens land 0600 on disk
+health sync whoop      # backfills two years by default, --since for more
+```
+
+`health auth whoop` starts a one-shot web server on port 8765 purely to catch
+the redirect, checks the OAuth `state` matches, and shuts down. After that,
+tokens refresh themselves and you should not need to do this again.
 
 ### Apple Health (this is also how Garmin and MyFitnessPal arrive)
 
