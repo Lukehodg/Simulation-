@@ -25,10 +25,12 @@ Built and tested:
 | **Cycle model** | Cycle reconstruction, phase inference, phase-aware baselines, physiological corroboration |
 | **Blood tests** | Panel import with unit conversion, reference-range flagging, phase-annotated trends |
 | **Research** | Europe PMC search returning study design, citations and DOIs |
+| **Daily features** | Robust baselines, deviations, training load, sleep regularity, autocorrelation-corrected correlations |
+| **Agent tools** | 19 MCP tools — the surface Claude actually talks to |
 
-Next: the Garmin export and `.FIT` parsers, then the rest of the features layer
-(rolling baselines, training load, energy availability), and the MCP tool
-server the agent talks to.
+Next: the Garmin export and `.FIT` parsers, energy availability (which needs
+Garmin's expenditure data), the morning brief as a scheduled job, and n-of-1
+experiment tracking.
 
 ## Setup
 
@@ -239,12 +241,47 @@ whether a finding applies to you.
 > the sandbox this was built in blocks outbound requests to it. If the shape
 > has drifted, the failure will be loud and the fix small.
 
+## The agent
+
+```sh
+claude mcp add health -- /path/to/.venv/bin/health mcp --root /path/to/project
+```
+
+That exposes 19 tools — baselines, deviations, correlations, training load,
+lift progression, cycle phase, blood results, literature search, and a daily
+brief that pulls them together. Then you can just ask:
+
+> *why has my sleep been bad since August?*
+> *am I actually getting stronger on RDLs, or just adding reps?*
+> *what does the literature say about my GGT?*
+
+The design rule is that **the model never queries the database freely, never
+receives a raw dump, and never does arithmetic**. Python computes; the model
+interprets. Every tool returns its own uncertainty alongside its answer —
+sample sizes, confidence intervals, whether a baseline was usable at all —
+because a number handed to a language model without its sample size comes back
+to you stated with total confidence.
+
+Failures come back as data rather than exceptions, too: an empty database
+returns "run `health init` first" as a readable message, because the MCP SDK
+strips exception text on the way out and a silent failure is exactly when the
+model starts guessing.
+
 ## Asking it things
 
 ```sh
 health sql "SELECT local_date, hrv, resting_hr, recovery, sleep_min FROM daily
             ORDER BY local_date DESC LIMIT 14"
 ```
+
+There is a statistics layer under those tools worth knowing about. Baselines
+are **robust** — median and MAD, not mean and standard deviation — so a
+fortnight of illness does not redefine normal, and the day being judged is
+excluded from its own baseline. Correlations are **corrected for
+autocorrelation**: health series are strongly serially correlated, so 90 days
+of data does not contain 90 independent observations, and treating it as
+though it does turns ordinary noise into confident findings. `correlate`
+reports the effective sample size and widens its interval accordingly.
 
 `daily` is the convenience pivot; `daily_metrics` is one row per metric per day
 from the highest-priority source that recorded it; `observations` is everything

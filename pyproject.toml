@@ -12,6 +12,8 @@ dependencies = [
     "pytz>=2024.1",
     # Lab reports arrive as PDFs more often than as anything structured.
     "pypdf>=4.0",
+    # The tool surface the agent talks to.
+    "mcp>=2.0",
 ]
 
 [project.optional-dependencies]

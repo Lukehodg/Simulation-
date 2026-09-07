@@ -14,6 +14,7 @@
     health lifts [EXERCISE]     strength progression, or one exercise's history
     health volume [--weeks N]   weekly tonnage by muscle group
     health sql "SELECT ..."     ask the database directly
+    health mcp                  serve the tools Claude calls (stdio)
 """
 
 from __future__ import annotations
@@ -142,6 +143,15 @@ def cmd_doctor(args, config) -> int:
         problems += 0 if ok else 1
         print(f"[{'ok' if ok else '--'}] {name:<14}{detail}")
     return 1 if problems else 0
+
+
+def cmd_mcp(args, config) -> int:
+    """Serve the tool surface over stdio. Nothing is printed to stdout here —
+    that channel is the protocol."""
+    from .mcp_server import run
+
+    run(config)
+    return 0
 
 
 def cmd_sql(args, config) -> int:
@@ -503,6 +513,8 @@ def build_parser() -> argparse.ArgumentParser:
     volume = sub.add_parser("volume", help="weekly tonnage by muscle group")
     volume.add_argument("--weeks", type=int, default=8)
     volume.set_defaults(fn=cmd_volume)
+
+    sub.add_parser("mcp", help="serve the tools Claude calls").set_defaults(fn=cmd_mcp)
 
     sql = sub.add_parser("sql", help="run a query")
     sql.add_argument("query")
