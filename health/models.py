@@ -117,6 +117,26 @@ class NutritionItem(_Base):
     fat_g: float | None = None
 
 
+class LabResult(_Base):
+    source: str
+    panel_id: str
+    analyte: str
+    local_date: date
+    value: float | None = None
+    unit: str | None = None
+    ref_low: float | None = None
+    ref_high: float | None = None
+    ref_source: str | None = None
+    flag: str | None = None
+    converted: bool | None = None
+    lab: str | None = None
+    fasting: bool | None = None
+    note: str | None = None
+    raw_name: str | None = None
+    raw_value: str | None = None
+    raw_unit: str | None = None
+
+
 class CycleEvent(_Base):
     source: str
     local_date: date
@@ -137,6 +157,7 @@ class Records:
     nutrition_days: list[NutritionDay] = field(default_factory=list)
     nutrition_items: list[NutritionItem] = field(default_factory=list)
     cycle_events: list[CycleEvent] = field(default_factory=list)
+    lab_results: list[LabResult] = field(default_factory=list)
     #: Workouts the source says were deleted upstream. Parsers report them;
     #: the store applies them, so that a session you deleted in the app on
     #: Tuesday doesn't linger in your training load forever.

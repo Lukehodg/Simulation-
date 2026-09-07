@@ -7,7 +7,7 @@ point estimates — a slope over three sessions and a slope over thirty should
 not look identical by the time they reach a language model.
 """
 
-from . import cycle
+from . import cycle, labs
 from .cycle import (
     Cycle,
     Reading,
@@ -26,6 +26,7 @@ from .strength import (
 )
 
 __all__ = [
+    "labs",
     "Cycle", "Reading", "cycle", "cycles", "phase_adjusted", "phase_baselines",
     "phase_signature",
     "Progression", "exercise_summary", "progression", "session_history",

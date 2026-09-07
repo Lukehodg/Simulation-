@@ -131,6 +131,32 @@ CREATE TABLE IF NOT EXISTS cycle_events (
     PRIMARY KEY (source, local_date, event)
 );
 
+-- Blood tests. One row per analyte per panel. Values are stored in the
+-- canonical unit for the analyte with the reference range converted alongside
+-- them, and the lab's own words are kept in raw_* so nothing is lost to our
+-- vocabulary being incomplete.
+CREATE TABLE IF NOT EXISTS lab_results (
+    source      VARCHAR NOT NULL,
+    panel_id    VARCHAR NOT NULL,
+    analyte     VARCHAR NOT NULL,
+    local_date  DATE    NOT NULL,
+    value       DOUBLE,
+    unit        VARCHAR,
+    ref_low     DOUBLE,
+    ref_high    DOUBLE,
+    ref_source  VARCHAR,        -- lab | generic | none
+    flag        VARCHAR,        -- low | normal | high | unknown
+    converted   BOOLEAN,        -- false when we did not recognise the unit
+    lab         VARCHAR,
+    fasting     BOOLEAN,
+    note        VARCHAR,
+    raw_name    VARCHAR,
+    raw_value   VARCHAR,
+    raw_unit    VARCHAR,
+    ingested_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (source, panel_id, analyte)
+);
+
 -- Derived: one row per day of every cycle we can reconstruct. Rebuilt from
 -- cycle_events by `health.features.cycle.rebuild`, never written by a source.
 CREATE TABLE IF NOT EXISTS cycle_days (

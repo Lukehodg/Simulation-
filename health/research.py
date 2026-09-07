@@ -1,0 +1,151 @@
+"""Literature lookup, via Europe PMC.
+
+Open, keyless, and it indexes MEDLINE plus preprints with publication types and
+citation counts attached — which is what lets us hand back *what kind* of study
+each result is rather than a flat list of titles.
+
+This module retrieves and structures evidence. It does not interpret it, rank
+it by quality, or draw conclusions from it: a citation count is popularity, a
+publication type is a design, and neither is a verdict. The agent reading these
+results is expected to say what the papers found and how good they are, with
+the reference attached, so that you can check it.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import date
+from typing import Iterable
+
+import httpx
+
+API = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
+USER_AGENT = "personal-health-agent/0.1 (local, single user)"
+
+#: Study designs, strongest evidence first. Used to label and order results,
+#: never to decide what a paper means.
+DESIGN_RANK = {
+    "meta-analysis": 0,
+    "systematic review": 1,
+    "randomized controlled trial": 2,
+    "clinical trial": 3,
+    "review": 4,
+    "journal article": 5,
+}
+
+
+@dataclass
+class Paper:
+    title: str
+    journal: str | None = None
+    year: int | None = None
+    authors: str | None = None
+    doi: str | None = None
+    pmid: str | None = None
+    designs: tuple[str, ...] = ()
+    cited_by: int = 0
+    open_access: bool = False
+    abstract: str | None = None
+
+    @property
+    def design(self) -> str:
+        """The strongest design this paper is tagged with."""
+        if not self.designs:
+            return "journal article"
+        return min(self.designs, key=lambda d: DESIGN_RANK.get(d, 99))
+
+    @property
+    def url(self) -> str | None:
+        if self.doi:
+            return f"https://doi.org/{self.doi}"
+        if self.pmid:
+            return f"https://pubmed.ncbi.nlm.nih.gov/{self.pmid}/"
+        return None
+
+    def cite(self) -> str:
+        bits = [self.title.rstrip(".")]
+        if self.journal:
+            bits.append(self.journal)
+        if self.year:
+            bits.append(str(self.year))
+        return ". ".join(bits) + "."
+
+
+def build_query(terms: str, since_year: int | None = None,
+                designs: Iterable[str] | None = None) -> str:
+    """Europe PMC query string.
+
+    Restricted to titles and abstracts, because a full-text match returns every
+    paper that merely cited something about ferritin.
+    """
+    parts = [f'(TITLE_ABS:"{terms}")' if " " in terms else f"(TITLE_ABS:{terms})"]
+    if designs:
+        clause = " OR ".join(f'PUB_TYPE:"{d}"' for d in designs)
+        parts.append(f"({clause})")
+    if since_year:
+        parts.append(f"(FIRST_PDATE:[{since_year}-01-01 TO {date.today().year}-12-31])")
+    parts.append("(SRC:MED OR SRC:PMC OR SRC:PPR)")
+    return " AND ".join(parts)
+
+
+def _paper(result: dict) -> Paper:
+    designs = tuple(
+        d.lower() for d in
+        (result.get("pubTypeList", {}) or {}).get("pubType", []) or []
+    )
+    year = result.get("pubYear")
+    return Paper(
+        title=(result.get("title") or "").strip(),
+        journal=result.get("journalTitle") or None,
+        year=int(year) if str(year).isdigit() else None,
+        authors=result.get("authorString") or None,
+        doi=result.get("doi") or None,
+        pmid=result.get("pmid") or None,
+        designs=designs,
+        cited_by=int(result.get("citedByCount") or 0),
+        open_access=(result.get("isOpenAccess") == "Y"),
+        abstract=(result.get("abstractText") or None),
+    )
+
+
+def search(terms: str, limit: int = 8, since_year: int | None = None,
+           designs: Iterable[str] | None = None,
+           client: httpx.Client | None = None) -> list[Paper]:
+    """Search Europe PMC. Returns papers ordered by study design, then citations."""
+    owns_client = client is None
+    client = client or httpx.Client(timeout=30.0, headers={"User-Agent": USER_AGENT})
+    try:
+        response = client.get(API, params={
+            "query": build_query(terms, since_year=since_year, designs=designs),
+            "format": "json",
+            "pageSize": max(limit, 25),   # over-fetch so the sort has something to do
+            "resultType": "core",
+            "sort": "CITED desc",
+        })
+        response.raise_for_status()
+        payload = response.json()
+    finally:
+        if owns_client:
+            client.close()
+
+    papers = [_paper(r) for r in
+              (payload.get("resultList", {}) or {}).get("result", [])]
+    papers.sort(key=lambda p: (DESIGN_RANK.get(p.design, 99), -p.cited_by))
+    return papers[:limit]
+
+
+def evidence_query(analyte: str, direction: str | None = None,
+                   context: str | None = None) -> str:
+    """Turn a lab result into something worth searching for.
+
+    The direction matters: the literature on low ferritin and the literature on
+    high ferritin are different literatures.
+    """
+    from .analytes import ANALYTES
+
+    label = ANALYTES[analyte].label if analyte in ANALYTES else analyte
+    label = label.split(" (")[0]
+    parts = [f"{direction} {label}" if direction in ("low", "high") else label]
+    if context:
+        parts.append(context)
+    return " ".join(parts)

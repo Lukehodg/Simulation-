@@ -7,6 +7,9 @@
     health replay [source]      rebuild every table from raw/, no network
     health status               what's in the database, and how fresh
     health doctor               check credentials and connectivity
+    health labs add FILE        add a blood panel (JSON or CSV)
+    health labs [ANALYTE]       latest results, flags and trends
+    health research "question"  search the literature, with citations
     health cycle [--metric M]   where you are, and how a metric moves by phase
     health lifts [EXERCISE]     strength progression, or one exercise's history
     health volume [--weeks N]   weekly tonnage by muscle group
@@ -20,8 +23,11 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from . import research as research_api
+from .analytes import ANALYTES, canonical_analyte
 from .features import (
     cycle as cycle_features,
+    labs as lab_features,
     exercise_summary, progression, session_history, stale_lifts, weekly_volume,
 )
 from .config import load_config
@@ -159,6 +165,139 @@ def cmd_sql(args, config) -> int:
     for row in rows:
         print(" | ".join("" if v is None else str(v) for v in row))
     print(f"\n{len(rows)} row(s)")
+    return 0
+
+
+def _print_paper(index: int, paper) -> None:
+    line = f"{index}. {paper.title.rstrip('.')}"
+    print(line)
+    meta = [paper.design]
+    if paper.journal:
+        meta.append(paper.journal)
+    if paper.year:
+        meta.append(str(paper.year))
+    meta.append(f"cited {paper.cited_by}")
+    if paper.open_access:
+        meta.append("open access")
+    print(f"   {' · '.join(meta)}")
+    if paper.url:
+        print(f"   {paper.url}")
+
+
+def cmd_labs(args, config) -> int:
+    config.ensure_dirs()
+    source = build_source("labs", config)
+
+    if args.add:
+        path = Path(args.add).expanduser()
+        if not path.exists():
+            raise SystemExit(f"{path} does not exist")
+        with _store(config) as store:
+            landed = source.add(path, date=args.date, lab=args.lab)
+            records = source.parse(landed)
+            written = store.load(records)
+            store.record_raw(landed, "labs", "panel",
+                             datetime.now(timezone.utc), parsed=True)
+            print(f"added {written.get('lab_results', 0)} result(s) from {path.name}")
+            skipped = source.unknown_analytes(landed)
+            if skipped:
+                print("not recognised, so not stored: " + ", ".join(skipped))
+                print("tell me and I will add them to the vocabulary.")
+        return 0
+
+    with _store(config, read_only=True) as store:
+        if args.analyte:
+            key = canonical_analyte(args.analyte) or args.analyte
+            values = lab_features.history(store, key)
+            if not values:
+                print(f"No results stored for {args.analyte!r}.")
+                return 1
+            spec = ANALYTES.get(key)
+            print(f"{spec.label if spec else key}")
+            result = lab_features.trend(store, key)
+            print(result.describe())
+            if spec and spec.note:
+                print(f"note: {spec.note}")
+            print()
+            print(f"{'date':<12}{'value':>14}  {'flag':<8}{'range':<18}phase")
+            print("-" * 66)
+            for value in values:
+                shown = f"{value.value:.4g} {value.unit}" if value.value is not None else "-"
+                print(f"{str(value.local_date):<12}{shown:>14}  {value.flag:<8}"
+                      f"{value.range_text:<18}{value.phase or ''}")
+            return 0
+
+        all_panels = lab_features.panels(store)
+        if not all_panels:
+            print("No blood tests yet. Add one with:\n"
+                  "  health labs add panel.json\n"
+                  "  health labs add panel.csv --date 2026-08-14 --lab Medichecks")
+            return 0
+
+        day, lab, count = all_panels[0]
+        print(f"latest panel: {day}" + (f" ({lab})" if lab else "")
+              + f", {count} result(s); {len(all_panels)} panel(s) stored\n")
+        print(f"{'analyte':<26}{'value':>14}  {'flag':<8}{'range':<18}phase")
+        print("-" * 80)
+        for value in lab_features.latest_panel(store):
+            shown = f"{value.value:.4g} {value.unit}" if value.value is not None else "-"
+            print(f"{value.label[:25]:<26}{shown:>14}  {value.flag:<8}"
+                  f"{value.range_text:<18}{value.phase or ''}")
+
+        unknown_units = lab_features.unconverted(store)
+        if unknown_units:
+            print("\nunit not recognised, so no flag was applied: " +
+                  ", ".join(f"{a} ({u})" for a, u, _ in unknown_units))
+
+        out_of_range = lab_features.flagged(store)
+        if out_of_range:
+            print("\noutside the reference range:")
+            for value in out_of_range:
+                print(f"  {value.label} {value.value:.4g} {value.unit} "
+                      f"({value.flag}, range {value.range_text})")
+                if value.note:
+                    print(f"    {value.note}")
+            print("\nThese are worth raising with your doctor. To see what the "
+                  "literature says:\n  health research --analyte "
+                  f"{out_of_range[0].analyte}")
+    return 0
+
+
+def cmd_research(args, config) -> int:
+    if args.analyte:
+        key = canonical_analyte(args.analyte) or args.analyte
+        direction = None
+        with _store(config, read_only=True) as store:
+            history = lab_features.history(store, key)
+        if history:
+            latest = history[-1]
+            direction = latest.flag if latest.flag in ("low", "high") else None
+            print(f"your most recent {latest.label}: {latest.value:.4g} {latest.unit} "
+                  f"({latest.flag}, range {latest.range_text})\n")
+        terms = research_api.evidence_query(key, direction, args.context)
+    else:
+        terms = args.query
+    if not terms:
+        raise SystemExit("Give a question, or --analyte ferritin")
+
+    designs = None if args.all else ["Meta-Analysis", "Systematic Review",
+                                     "Randomized Controlled Trial", "Review"]
+    print(f'searching: "{terms}"\n')
+    try:
+        papers = research_api.search(terms, limit=args.limit,
+                                     since_year=args.since, designs=designs)
+    except Exception as exc:  # noqa: BLE001 - a search tool, not a crash site
+        raise SystemExit(f"Europe PMC lookup failed: {type(exc).__name__}: {exc}")
+
+    if not papers:
+        print("Nothing found. Try broader terms, or --all to include every "
+              "study design.")
+        return 1
+    for index, paper in enumerate(papers, 1):
+        _print_paper(index, paper)
+        print()
+    print("Study design and citation count are shown so you can weigh these "
+          "yourself. They describe the paper, not whether it applies to you.")
     return 0
 
 
@@ -330,6 +469,23 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("status", help="what's in the database").set_defaults(fn=cmd_status)
     sub.add_parser("doctor", help="check credentials and connectivity").set_defaults(fn=cmd_doctor)
+
+    labs = sub.add_parser("labs", help="blood tests")
+    labs.add_argument("analyte", nargs="?", help="one analyte's history")
+    labs.add_argument("--add", metavar="FILE", help="add a panel (JSON or CSV)")
+    labs.add_argument("--date", help="date of the draw, if the file lacks one")
+    labs.add_argument("--lab", help="which lab ran it")
+    labs.set_defaults(fn=cmd_labs)
+
+    research = sub.add_parser("research", help="search the literature")
+    research.add_argument("query", nargs="?", help="what to search for")
+    research.add_argument("--analyte", help="search around one of your results")
+    research.add_argument("--context", help="extra terms, e.g. 'endurance athletes'")
+    research.add_argument("--since", type=int, default=2015, help="earliest year")
+    research.add_argument("--limit", type=int, default=8)
+    research.add_argument("--all", action="store_true",
+                          help="include every study design, not just reviews and trials")
+    research.set_defaults(fn=cmd_research)
 
     cycle_cmd = sub.add_parser("cycle", help="cycle phase and phase-aware baselines")
     cycle_cmd.add_argument("--metric", action="append",

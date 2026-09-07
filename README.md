@@ -23,6 +23,8 @@ Built and tested:
 | **Apple Health** | Health Auto Export JSON — carries Garmin dailies, MyFitnessPal macros, sleep and period logs |
 | **Strength analysis** | Estimated 1RM trends with their fit, weekly tonnage by muscle group, stale-lift detection |
 | **Cycle model** | Cycle reconstruction, phase inference, phase-aware baselines, physiological corroboration |
+| **Blood tests** | Panel import with unit conversion, reference-range flagging, phase-annotated trends |
+| **Research** | Europe PMC search returning study design, citations and DOIs |
 
 Next: the Garmin export and `.FIT` parsers, then the rest of the features layer
 (rolling baselines, training load, energy availability), and the MCP tool
@@ -144,6 +146,83 @@ estimated — a phase baseline needs five same-phase days, a first cycle with no
 completed cycle behind it is left unplaced rather than guessed at, and gaps too
 long to be real cycles are reported as probable unlogged periods instead of
 being averaged into your median.
+
+## Blood tests
+
+Labs arrive as a file, not an API. Write one panel per file, in either format:
+
+```json
+{"date": "2026-08-14", "lab": "Medichecks", "fasting": true,
+ "results": [{"analyte": "Ferritin", "value": 11, "unit": "ug/L",
+              "ref_low": 13, "ref_high": 150},
+             {"analyte": "25-Hydroxyvitamin D", "value": 30, "unit": "ng/mL"}]}
+```
+
+```csv
+analyte,value,unit,ref_low,ref_high
+Ferritin,11,ug/L,13,150
+```
+
+```sh
+health labs add panel.json
+health labs                      # latest panel, flags, and what is out of range
+health labs ferritin             # one analyte over time
+```
+
+```
+analyte                            value  flag    range             phase
+Ferritin                         11 ug/L  low     13-150            luteal
+HbA1c                      35.5 mmol/mol  normal  <41 (generic)     luteal
+LDL cholesterol                 3 mmol/L  normal  <3 (generic)      luteal
+Vitamin D (25-OH)           74.88 nmol/L  normal  50-125 (generic)  luteal
+```
+
+Three things it handles that are easy to get quietly wrong:
+
+**Units.** A UK lab reports LDL in mmol/L and an American paper discusses
+mg/dL. Values are converted into one canonical unit per analyte — and the
+reference range is converted with them, because converting one and not the
+other turns a normal result into a scare. HbA1c percent uses its affine
+conversion rather than a factor. A unit we don't recognise leaves the number
+untouched and withholds the flag rather than guessing.
+
+**Reference ranges.** Your lab's own range always wins, because it belongs to
+their assay and their population. Where a result arrives without one, a generic
+adult range is used and marked `(generic)` everywhere it appears. The
+fallbacks are adult female ranges — change `REFERENCE_PROFILE` in
+`health/analytes.py` if that is not you.
+
+**Cycle phase.** Every draw is annotated with the phase it was taken in.
+Oestradiol, progesterone, LH and FSH vary several-fold across a cycle, and
+ferritin and haemoglobin move with menstrual blood loss, so a trend across
+draws taken in different phases is refused rather than plotted:
+
+```
+Oestradiol moves with the cycle and these draws span follicular, luteal;
+compare draws from the same phase, not this series
+```
+
+## Research
+
+```sh
+health research "creatine supplementation women"
+health research --analyte ferritin --context "endurance athletes"
+```
+
+Searches Europe PMC — open, keyless, indexes MEDLINE and preprints — and
+returns each paper with its study design, journal, year, citation count and
+DOI. Results are ordered by design rather than citations, since a meta-analysis
+outranks a more-cited narrative review. Searching `--analyte` uses your own
+most recent result and its direction, because the literature on *low* ferritin
+and the literature on *high* ferritin are different literatures.
+
+It retrieves and labels evidence; it does not interpret it. A citation count is
+popularity and a publication type is a design, and neither is a verdict on
+whether a finding applies to you.
+
+> Verified against a recorded Europe PMC response, not against the live API —
+> the sandbox this was built in blocks outbound requests to it. If the shape
+> has drifted, the failure will be loud and the fix small.
 
 ## Asking it things
 

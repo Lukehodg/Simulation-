@@ -1,0 +1,16 @@
+{"hitCount": 2, "resultList": {"result": [
+  {"id": "40000001", "source": "MED", "pmid": "40000001",
+   "doi": "10.1000/example.1",
+   "title": "Iron deficiency without anaemia in female endurance athletes: a review.",
+   "authorString": "Smith J, Patel R.", "journalTitle": "Sports Medicine",
+   "pubYear": "2024", "citedByCount": "12", "isOpenAccess": "N",
+   "pubTypeList": {"pubType": ["Review", "Journal Article"]},
+   "abstractText": "Ferritin thresholds below 30 ug/L are commonly used..."},
+  {"id": "40000002", "source": "MED", "pmid": "40000002",
+   "doi": "10.1000/example.2",
+   "title": "Iron supplementation and performance: a meta-analysis.",
+   "authorString": "Okafor A.", "journalTitle": "BJSM",
+   "pubYear": "2023", "citedByCount": "4", "isOpenAccess": "Y",
+   "pubTypeList": {"pubType": ["Meta-Analysis"]},
+   "abstractText": "Pooled results from 14 trials..."}
+]}}

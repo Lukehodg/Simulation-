@@ -11,12 +11,15 @@ from __future__ import annotations
 from .apple_health import AppleHealthSource
 from .base import Source
 from .hevy import HevySource
+from .labs import LabsSource
 from .whoop import WhoopSource
 
 SOURCES: dict[str, type[Source]] = {
     "whoop": WhoopSource,
     "hevy": HevySource,
     "apple_health": AppleHealthSource,
+    "labs": LabsSource,
 }
 
-__all__ = ["SOURCES", "Source", "WhoopSource", "HevySource", "AppleHealthSource"]
+__all__ = ["SOURCES", "Source", "WhoopSource", "HevySource", "AppleHealthSource",
+           "LabsSource"]

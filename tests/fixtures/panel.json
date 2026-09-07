@@ -1,0 +1,12 @@
+{"date": "2026-08-14", "lab": "Medichecks", "fasting": true,
+ "results": [
+   {"analyte": "Ferritin", "value": 11, "unit": "ug/L", "ref_low": 13, "ref_high": 150},
+   {"analyte": "Haemoglobin", "value": 12.4, "unit": "g/dL", "ref_low": 12.0, "ref_high": 15.0},
+   {"analyte": "25-Hydroxyvitamin D", "value": 30, "unit": "ng/mL"},
+   {"analyte": "TSH", "value": 2.1, "unit": "mIU/L", "ref_low": 0.27, "ref_high": 4.2},
+   {"analyte": "HbA1c", "value": 5.4, "unit": "%"},
+   {"analyte": "LDL Cholesterol", "value": 116, "unit": "mg/dL"},
+   {"analyte": "CRP", "value": "<0.3", "unit": "mg/L"},
+   {"analyte": "Oestradiol", "value": 210, "unit": "pmol/L"},
+   {"analyte": "Klingon Particle Index", "value": 7, "unit": "qapla"}
+ ]}

@@ -58,6 +58,12 @@ TABLES: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
         ("source", "local_date", "meal", "item_idx", "food", "quantity", "kcal",
          "protein_g", "carbs_g", "fat_g", "ingested_at"),
     ),
+    "lab_results": (
+        ("source", "panel_id", "analyte"),
+        ("source", "panel_id", "analyte", "local_date", "value", "unit", "ref_low",
+         "ref_high", "ref_source", "flag", "converted", "lab", "fasting", "note",
+         "raw_name", "raw_value", "raw_unit", "ingested_at"),
+    ),
     "cycle_events": (
         ("source", "local_date", "event"),
         ("source", "local_date", "event", "flow", "value", "ingested_at"),
@@ -74,6 +80,7 @@ _RECORD_TABLES = {
     "nutrition_days": "nutrition_days",
     "nutrition_items": "nutrition_items",
     "cycle_events": "cycle_events",
+    "lab_results": "lab_results",
 }
 
 
@@ -265,6 +272,9 @@ class Store:
             UNION ALL
             SELECT source, 'cycle_events', MIN(local_date), MAX(local_date), COUNT(*)
             FROM cycle_events GROUP BY source
+            UNION ALL
+            SELECT source, 'lab_results', MIN(local_date), MAX(local_date), COUNT(*)
+            FROM lab_results GROUP BY source
             ORDER BY 1, 2
             """
         ).fetchall()
