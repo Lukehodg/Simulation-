@@ -23,7 +23,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+#: Generic reference ranges are sex-specific for a good number of analytes.
+#: Where a panel says which, we use it; otherwise this is the fallback.
 REFERENCE_PROFILE = "adult_female"
+PROFILES = ("adult_female", "adult_male")
+
+
+def profile_for(sex: str | None) -> str:
+    if not sex:
+        return REFERENCE_PROFILE
+    return "adult_male" if sex.strip().lower().startswith("m") else "adult_female"
 
 
 @dataclass(frozen=True)
@@ -40,19 +49,48 @@ class Analyte:
     #: cycle, so draws taken in different phases are not compared blindly.
     cycle_sensitive: bool = False
     note: str | None = None
+    #: Sex-specific generic intervals, where one interval would be wrong for
+    #: half the population. (low, high), either bound optional.
+    ref_male: tuple[float | None, float | None] | None = None
+    ref_female: tuple[float | None, float | None] | None = None
+
+    def ranges(self, profile: str | None = None) -> tuple[float | None, float | None]:
+        if profile == "adult_male" and self.ref_male:
+            return self.ref_male
+        if profile == "adult_female" and self.ref_female:
+            return self.ref_female
+        return self.ref_low, self.ref_high
 
 
 ANALYTES: dict[str, Analyte] = {a.key: a for a in [
     # Iron studies — the group most worth tracking alongside a cycle
     Analyte("ferritin", "Ferritin", "ug/L", "iron", 15, 200, cycle_sensitive=True,
+            ref_male=(30, 400), ref_female=(15, 200),
             note="an acute-phase reactant: rises with inflammation, so a normal "
                  "ferritin alongside a raised CRP can still mask iron deficiency"),
-    Analyte("haemoglobin", "Haemoglobin", "g/L", "iron", 120, 150, cycle_sensitive=True),
+    Analyte("haemoglobin", "Haemoglobin", "g/L", "iron", 120, 150, cycle_sensitive=True,
+            ref_male=(130, 175), ref_female=(120, 155)),
     Analyte("iron", "Serum iron", "umol/L", "iron", 10, 30, cycle_sensitive=True),
     Analyte("transferrin_saturation", "Transferrin saturation", "%", "iron", 20, 50),
     Analyte("b12", "Vitamin B12", "pmol/L", "vitamins", 180, 900),
     Analyte("folate", "Folate", "nmol/L", "vitamins", 7, None),
     Analyte("vitamin_d", "Vitamin D (25-OH)", "nmol/L", "vitamins", 50, 125),
+
+    # Full blood count
+    Analyte("haematocrit", "Haematocrit", "%", "fbc",
+            ref_male=(40, 52), ref_female=(36, 48)),
+    Analyte("mch", "MCH", "pg", "fbc", 27, 32),
+    Analyte("mchc", "MCHC", "g/L", "fbc", 320, 360),
+    Analyte("mcv", "MCV", "fL", "fbc", 80, 100),
+    Analyte("rbc", "Red blood cell count", "10^12/L", "fbc",
+            ref_male=(4.5, 6.5), ref_female=(3.8, 5.8)),
+    Analyte("wbc", "White blood cell count", "10^9/L", "fbc", 4.0, 10.0),
+    Analyte("neutrophils", "Neutrophils", "10^9/L", "fbc", 2.0, 7.5),
+    Analyte("lymphocytes", "Lymphocytes", "10^9/L", "fbc", 1.0, 3.5),
+    Analyte("monocytes", "Monocytes", "10^9/L", "fbc", 0.2, 0.8),
+    Analyte("eosinophils", "Eosinophils", "10^9/L", "fbc", 0.04, 0.4),
+    Analyte("basophils", "Basophils", "10^9/L", "fbc", 0.01, 0.1),
+    Analyte("platelets", "Platelets", "10^9/L", "fbc", 150, 450),
 
     # Thyroid
     Analyte("tsh", "TSH", "mIU/L", "thyroid", 0.4, 4.0),
@@ -72,9 +110,19 @@ ANALYTES: dict[str, Analyte] = {a.key: a for a in [
 
     # Inflammation, liver, kidney
     Analyte("crp", "CRP", "mg/L", "inflammation", None, 5),
-    Analyte("alt", "ALT", "U/L", "liver", None, 33),
+    Analyte("alt", "ALT", "U/L", "liver", None, 33,
+            ref_male=(None, 41), ref_female=(None, 33)),
     Analyte("ast", "AST", "U/L", "liver", None, 32),
-    Analyte("creatinine", "Creatinine", "umol/L", "kidney", 45, 90),
+    Analyte("alp", "Alkaline phosphatase", "U/L", "liver", 30, 130),
+    Analyte("ggt", "GGT", "U/L", "liver", None, 40,
+            ref_male=(None, 60), ref_female=(None, 40),
+            note="rises with alcohol, some medications, and fatty liver; a "
+                 "single raised GGT is a prompt to look, not a diagnosis"),
+    Analyte("bilirubin", "Total bilirubin", "umol/L", "liver", None, 21),
+    Analyte("albumin", "Albumin", "g/L", "liver", 35, 50),
+    Analyte("creatinine", "Creatinine", "umol/L", "kidney", 45, 90,
+            ref_male=(60, 110), ref_female=(45, 90)),
+    Analyte("urea", "Urea", "mmol/L", "kidney", 2.5, 7.8),
     Analyte("egfr", "eGFR", "mL/min/1.73m2", "kidney", 90, None),
 
     # Hormones — every one of these is meaningless without the cycle day
@@ -86,11 +134,21 @@ ANALYTES: dict[str, Analyte] = {a.key: a for a in [
                  "follicular draw is expected to be low"),
     Analyte("lh", "LH", "IU/L", "hormones", cycle_sensitive=True),
     Analyte("fsh", "FSH", "IU/L", "hormones", cycle_sensitive=True),
-    Analyte("testosterone", "Testosterone", "nmol/L", "hormones", 0.3, 1.7),
+    Analyte("testosterone", "Testosterone", "nmol/L", "hormones", 0.3, 1.7,
+            ref_male=(8.6, 29.0), ref_female=(0.3, 1.7)),
+    Analyte("free_testosterone", "Free testosterone", "nmol/L", "hormones",
+            ref_male=(0.175, 0.687)),
     Analyte("shbg", "SHBG", "nmol/L", "hormones", 30, 120),
     Analyte("prolactin", "Prolactin", "mIU/L", "hormones", 100, 500),
     Analyte("amh", "AMH", "pmol/L", "hormones"),
     Analyte("cortisol", "Cortisol (morning)", "nmol/L", "hormones", 133, 537),
+
+    # Lipid ratio and prostate — reported by several UK panels
+    Analyte("chol_hdl_ratio", "Total chol / HDL ratio", "ratio", "lipids",
+            None, 5.0),
+    Analyte("haematocrit_corrected", "Haematocrit (corrected)", "%", "fbc",
+            ref_male=(40, 52), ref_female=(36, 48)),
+    Analyte("psa", "PSA (total)", "ug/L", "other", None, 1.4),
 ]}
 
 #: Lab spellings we have seen, lowercased and stripped of punctuation.
@@ -124,6 +182,34 @@ ALIASES: dict[str, str] = {
     "fasting insulin": "insulin",
     "estimated gfr": "egfr", "egfr": "egfr",
     "vitamin d3": "vitamin_d",
+    # Randox / UK panel spellings
+    "mean cell haemoglobin mch": "mch", "mean cell haemoglobin": "mch",
+    "mean cell haemoglobin concentration mchc": "mchc",
+    "mean cell haemoglobin concentration": "mchc",
+    "red blood cell mean cell volume mcv": "mcv", "mean cell volume": "mcv",
+    "red blood cell count": "rbc", "white blood cell count": "wbc",
+    "neutrophil count": "neutrophils", "lymphocyte count": "lymphocytes",
+    "monocyte count": "monocytes", "eosinophil count": "eosinophils",
+    "basophil count": "basophils", "platelet count": "platelets",
+    "haematocrit": "haematocrit", "hematocrit": "haematocrit",
+    "hctratio corrected": "haematocrit_corrected",
+    "haematocrit ratio corrected": "haematocrit_corrected",
+    "alanine aminotransferase alt": "alt",
+    "aspartate aminotransferase ast": "ast",
+    "alkaline phosphatase alp": "alp", "alkaline phosphatase": "alp",
+    "gamma glutamyltransferase ggt": "ggt", "gamma glutamyl transferase": "ggt",
+    "ggt": "ggt", "total bilirubin": "bilirubin", "bilirubin": "bilirubin",
+    "albumin": "albumin", "urea": "urea",
+    "estimated glomerular filtration rate egfr": "egfr",
+    "thyroid stimulating hormone tsh": "tsh",
+    "free thyroxine ft4": "free_t4", "free triiodothyronine ft3": "free_t3",
+    "follicle stimulating hormone": "fsh", "luteinising hormone": "lh",
+    "sex hormone binding globulin": "shbg",
+    "free testosterone": "free_testosterone",
+    "total prostate specific antigen tpsa": "psa",
+    "prostate specific antigen": "psa", "psa": "psa",
+    "total cholesterol hdl cholesterol ratio": "chol_hdl_ratio",
+    "cholesterol hdl ratio": "chol_hdl_ratio",
 }
 
 #: (analyte, unit as written) -> multiplier to reach the canonical unit.
@@ -150,6 +236,9 @@ CONVERSIONS: dict[tuple[str, str], float] = {
     ("insulin", "uiu/ml"): 6.945, ("insulin", "miu/l"): 6.945,
     ("tsh", "uiu/ml"): 1.0,
     ("prolactin", "ng/ml"): 21.2,
+    # Several UK panels print the cholesterol/HDL ratio with a percent sign.
+    # It is a ratio; the unit is a typo, not a scale.
+    ("chol_hdl_ratio", "%"): 1.0,
 }
 
 #: Unit spellings normalised before lookup.
@@ -158,7 +247,10 @@ UNIT_ALIASES = {
     "µmol/l": "umol/l", "μmol/l": "umol/l",
     "µiu/ml": "uiu/ml", "μiu/ml": "uiu/ml",
     "µg/dl": "ug/dl", "μg/dl": "ug/dl",
-    "iu/ml": "iu/l", "u/l": "u/l",
+    "iu/ml": "iu/l", "u/l": "u/l", "iu_l": "iu/l", "miu/ml": "miu/l",
+    "10^9/l": "10^9/l", "10^12/l": "10^12/l", "fl": "fl", "pg": "pg",
+    "ml/min/1.7": "ml/min/1.73m2", "ml/min/1.73m²": "ml/min/1.73m2",
+    "ml/min": "ml/min/1.73m2",
     "%": "%", "percent": "%",
 }
 

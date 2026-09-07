@@ -10,6 +10,8 @@ dependencies = [
     # DuckDB converts TIMESTAMPTZ back to Python through pytz; without it every
     # query that selects a timestamp column fails at fetch time.
     "pytz>=2024.1",
+    # Lab reports arrive as PDFs more often than as anything structured.
+    "pypdf>=4.0",
 ]
 
 [project.optional-dependencies]

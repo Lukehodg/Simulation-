@@ -237,11 +237,11 @@ def cmd_labs(args, config) -> int:
         day, lab, count = all_panels[0]
         print(f"latest panel: {day}" + (f" ({lab})" if lab else "")
               + f", {count} result(s); {len(all_panels)} panel(s) stored\n")
-        print(f"{'analyte':<26}{'value':>14}  {'flag':<8}{'range':<18}phase")
-        print("-" * 80)
+        print(f"{'analyte':<26}{'value':>18}  {'flag':<8}{'range':<18}phase")
+        print("-" * 84)
         for value in lab_features.latest_panel(store):
             shown = f"{value.value:.4g} {value.unit}" if value.value is not None else "-"
-            print(f"{value.label[:25]:<26}{shown:>14}  {value.flag:<8}"
+            print(f"{value.label[:25]:<26}{shown:>18}  {value.flag:<8}"
                   f"{value.range_text:<18}{value.phase or ''}")
 
         unknown_units = lab_features.unconverted(store)

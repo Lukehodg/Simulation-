@@ -163,6 +163,21 @@ analyte,value,unit,ref_low,ref_high
 Ferritin,11,ug/L,13,150
 ```
 
+PDF reports from UK panel providers work directly:
+
+```sh
+health labs add report.pdf
+```
+
+The extracted text is what gets stored, not our reading of it, so a better line
+parser later re-reads reports you added months ago. Two things in those reports
+are easy to get backwards and are handled explicitly: a single printed
+reference bound is a ceiling beside cholesterol and a floor beside eGFR, so it
+is placed by the lab's own L/H marking where there is one and by the analyte's
+known direction otherwise — never guessed; and the report's stated biological
+sex selects the generic ranges, since 240 ug/L of ferritin is unremarkable on a
+male range and flagged high on a female one.
+
 ```sh
 health labs add panel.json
 health labs                      # latest panel, flags, and what is out of range

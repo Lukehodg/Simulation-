@@ -1,0 +1,32 @@
+Client Summary Report Page 1 of 2
+Name: A Person Sample Collection Date: 17-Aug-2026 08:00
+Biological Sex: Male Date of Receipt: 18-Aug-2026 16:16
+Date of Birth: 01-Jan-1990 Report Approved Date: 20-Aug-2026 10:20
+Order Number: MAN-00000000
+Clinic: MANUAL Report Status: Final
+Analyte Result Ref
+Low
+Ref
+High
+Low /
+High
+Sample
+Type
+Results
+Status
+Full Blood Count
+Haemoglobin 148.0 g/l 130.0 180.0 Blood Final
+Mean Cell Haemoglobin Concentration (MCHC) 315.0 g/l 320.0 360.0 L Blood Final
+Heart Health
+Total Cholesterol 4.80 mmol/l 5.00 Serum C Final
+HDL Cholesterol 1.10 mmol/l 1.55 L Serum C Final
+Kidney Health
+Estimated Glomerular Filtration Rate (eGFR) 95 ml/min/1.7 60 Serum C Final
+Liver Health
+Gamma-Glutamyltransferase (GGT) 88.0 u/l 10.0 71.0 H Serum C Final
+Ferritin 240.5 µg/l Serum C Final
+Hormonal Health
+Testosterone 15.200 nmol/l 8.640 29.000 Serum C Final
+- End of Report -
+This report has been generated on behalf of Randox Health. All laboratory testing is
+referred to RCLS.

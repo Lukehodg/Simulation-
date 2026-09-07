@@ -180,3 +180,90 @@ def test_cycle_sensitive_analytes_are_not_trended_across_phases(labs, config, st
 
     grouped = lab_features.by_phase(store, "oestradiol")
     assert set(grouped) == {"follicular", "luteal"}
+
+
+# -- PDF reports ------------------------------------------------------------
+
+REPORT_TEXT = (FIXTURES / "report_text.txt").read_text()
+
+
+@pytest.fixture
+def report(config, labs):
+    """Land an extracted report the way `health labs add report.pdf` does."""
+    from health import raw as rawstore
+    return rawstore.write(config.raw_dir, "labs", "panel",
+                          {"format": "pdf_text", "file": "report.pdf",
+                           "text": REPORT_TEXT})
+
+
+def test_report_header_gives_date_lab_and_sex():
+    from health.sources.labs import parse_report_text
+
+    parsed = parse_report_text(REPORT_TEXT)
+    assert parsed["date"] == "2026-08-17"      # collection date, not receipt
+    assert parsed["lab"] == "Randox Health"
+    assert parsed["sex"] == "Male"
+
+
+def test_page_furniture_is_not_mistaken_for_results(labs, report):
+    results = _by_analyte(labs.parse(report))
+    assert set(results) == {
+        "haemoglobin", "mchc", "cholesterol", "hdl", "egfr", "ggt", "ferritin",
+        "testosterone",
+    }
+    assert labs.unknown_analytes(report) == []
+
+
+def test_two_column_ranges_are_read_as_given(labs, report):
+    results = _by_analyte(labs.parse(report))
+    assert (results["haemoglobin"].ref_low, results["haemoglobin"].ref_high) == (130.0, 180.0)
+    assert results["haemoglobin"].ref_source == "lab"
+    assert results["haemoglobin"].flag == "normal"
+
+
+def test_a_single_bound_is_placed_by_the_labs_own_marker(labs, report):
+    """1.55 beside an HDL marked L is a floor, not a ceiling — and reading it
+    the other way would report a low HDL as perfectly normal."""
+    results = _by_analyte(labs.parse(report))
+    hdl = results["hdl"]
+
+    assert (hdl.ref_low, hdl.ref_high) == (1.55, None)
+    assert hdl.flag == "low"
+
+
+def test_a_single_bound_is_otherwise_placed_by_the_analytes_direction(labs, report):
+    results = _by_analyte(labs.parse(report))
+
+    # Cholesterol only has a ceiling...
+    assert (results["cholesterol"].ref_low, results["cholesterol"].ref_high) == (None, 5.0)
+    assert results["cholesterol"].flag == "normal"
+    # ...and eGFR only has a floor, from the same shaped line.
+    assert (results["egfr"].ref_low, results["egfr"].ref_high) == (60.0, None)
+    assert results["egfr"].flag == "normal"
+
+
+def test_the_labs_flag_wins_over_ours(labs, report):
+    results = _by_analyte(labs.parse(report))
+    assert results["ggt"].flag == "high"
+    assert results["mchc"].flag == "low"
+
+
+def test_biological_sex_selects_the_generic_range(labs, report):
+    """240 ug/L of ferritin is unremarkable on a male range and flagged high on
+    a female one, so the panel's own statement of sex has to drive it."""
+    ferritin = _by_analyte(labs.parse(report))["ferritin"]
+
+    assert ferritin.ref_source == "generic"
+    assert (ferritin.ref_low, ferritin.ref_high) == (30, 400)
+    assert ferritin.flag == "normal"
+
+
+def test_reparsing_the_landed_text_picks_up_parser_improvements(labs, report):
+    """raw/ holds the report text, not our reading of it, so `health replay`
+    re-reads the original rather than needing the PDF again."""
+    import json
+    payload = json.loads(report.read_text())
+
+    assert payload["format"] == "pdf_text"
+    assert "Gamma-Glutamyltransferase" in payload["text"]
+    assert len(labs.parse(report).lab_results) == 8
