@@ -22,10 +22,11 @@ Built and tested:
 | **Hevy** | Full history paging, incremental events feed, set-level parsing, upstream edits and deletions |
 | **Apple Health** | Health Auto Export JSON — carries Garmin dailies, MyFitnessPal macros, sleep and period logs |
 | **Strength analysis** | Estimated 1RM trends with their fit, weekly tonnage by muscle group, stale-lift detection |
+| **Cycle model** | Cycle reconstruction, phase inference, phase-aware baselines, physiological corroboration |
 
 Next: the Garmin export and `.FIT` parsers, then the rest of the features layer
-(baselines, training load, energy availability), the cycle model, and the MCP
-tool server the agent talks to.
+(rolling baselines, training load, energy availability), and the MCP tool
+server the agent talks to.
 
 ## Setup
 
@@ -105,6 +106,44 @@ above 12 reps count toward volume but are excluded from strength estimates —
 Epley is fitted to low-rep work and flatters endurance sets into fake PRs.
 Exercises with no Hevy template appear as `unmapped` in the volume table rather
 than disappearing from it.
+
+## Cycle
+
+```sh
+health cycle                       # where you are, and how metrics move by phase
+health cycle --day 2026-08-11      # judge one day against its own phase
+```
+
+```
+day 19 of a typical 28-day cycle   (luteal)
+
+metric                  menses  follicular   ovulation      luteal   luteal shift
+hrv_rmssd                 71.6        72.2        65.4        53.3   -18.8  (as expected)
+resting_hr                51.6        52.2        52.8        56.8   +4.6  (as expected)
+
+hrv_rmssd 46.6 on 2026-08-11 — luteal (cycle day 19) — -1.5 SD against your usual
+                                                     — -0.9 SD against the same phase (n=64)
+  ^ a phase-blind baseline would flag this; the same phase of your own cycles
+    says it is ordinary
+```
+
+That last line is the point of the whole module. None of Garmin, WHOOP or
+MyFitnessPal condition their scores on cycle phase, so a recovery score that is
+entirely normal for day 19 still reads as alarming — every month.
+
+Ovulation is estimated by counting **backwards** from the next period rather
+than forwards from the last, because luteal length is far more stable than
+follicular length; a "day 14" assumption is wrong for most cycles and wrong in
+a way that shifts with cycle length. The "as expected" column checks the
+calendar against your own physiology: the luteal phase should raise resting
+heart rate and lower HRV, and if your data disagrees it says so rather than
+quietly resolving it.
+
+Where there is not enough history the answer is withheld rather than
+estimated — a phase baseline needs five same-phase days, a first cycle with no
+completed cycle behind it is left unplaced rather than guessed at, and gaps too
+long to be real cycles are reported as probable unlogged periods instead of
+being averaged into your median.
 
 ## Asking it things
 

@@ -7,6 +7,7 @@
     health replay [source]      rebuild every table from raw/, no network
     health status               what's in the database, and how fresh
     health doctor               check credentials and connectivity
+    health cycle [--metric M]   where you are, and how a metric moves by phase
     health lifts [EXERCISE]     strength progression, or one exercise's history
     health volume [--weeks N]   weekly tonnage by muscle group
     health sql "SELECT ..."     ask the database directly
@@ -20,6 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .features import (
+    cycle as cycle_features,
     exercise_summary, progression, session_history, stale_lifts, weekly_volume,
 )
 from .config import load_config
@@ -138,7 +140,17 @@ def cmd_doctor(args, config) -> int:
 
 def cmd_sql(args, config) -> int:
     with _store(config, read_only=True) as store:
-        result = store.db.execute(args.query)
+        try:
+            result = store.db.execute(args.query)
+        except Exception as exc:  # noqa: BLE001 - a query tool, not a shell
+            if "read-only" in str(exc):
+                raise SystemExit(
+                    "`health sql` opens the database read-only. Loading and "
+                    "deleting data goes through `health sync`, `health ingest` "
+                    "and `health replay`, so that raw/ always explains what is "
+                    "in the tables."
+                )
+            raise SystemExit(f"{type(exc).__name__}: {exc}")
         columns = [d[0] for d in result.description or []]
         rows = result.fetchall()
     if columns:
@@ -147,6 +159,83 @@ def cmd_sql(args, config) -> int:
     for row in rows:
         print(" | ".join("" if v is None else str(v) for v in row))
     print(f"\n{len(rows)} row(s)")
+    return 0
+
+
+def cmd_cycle(args, config) -> int:
+    with _store(config) as store:
+        cycle_features.rebuild(store)
+        summary = cycle_features.summary(store)
+
+        if not summary.get("cycles"):
+            print(summary["note"])
+            return 1
+
+        length = summary["median_length"]
+        if summary["cycle_day"]:
+            print(f"day {summary['cycle_day']} of a typical {length or '?'}-day cycle"
+                  f"   ({summary['phase']})")
+        else:
+            print(f"today cannot be placed in a cycle")
+        print(f"this cycle began {summary['current_start']}"
+              f" ({summary['days_since_period']} days ago)")
+        if summary.get("note"):
+            print(summary["note"])
+        if summary.get("next_period_estimate") and not summary["overdue_days"]:
+            print(f"next period around {summary['next_period_estimate']}"
+                  + ("   (estimated from your median cycle)" if length else ""))
+        span = summary["length_range"]
+        if span:
+            print(f"\n{summary['completed']} completed cycle(s), "
+                  f"{span[0]}-{span[1]} days"
+                  + ("   — variable enough to be worth mentioning to a clinician"
+                     if summary["irregular"] else ""))
+        if summary["implausible_lengths"]:
+            print(f"gaps of {summary['implausible_lengths']} days look like "
+                  f"unlogged cycles rather than long ones, and are left out of "
+                  f"the median")
+
+        metrics = args.metric or ["hrv_rmssd", "resting_hr"]
+        rows = []
+        for metric in metrics:
+            stats = cycle_features.phase_baselines(store, metric)
+            if not any(s.n for s in stats.values()):
+                continue
+            rows.append((metric, stats, cycle_features.phase_signature(store, metric)))
+
+        if not rows:
+            print("\nNo metrics with enough history to break down by phase yet.")
+            return 0
+
+        print(f"\n{'metric':<18}" + "".join(f"{p[:10]:>12}" for p in cycle_features.PHASES)
+              + "   luteal shift")
+        print("-" * 84)
+        for metric, stats, signature in rows:
+            cells = "".join(
+                f"{stats[p].mean:>12.1f}" if stats[p].usable else f"{'-':>12}"
+                for p in cycle_features.PHASES
+            )
+            delta = signature["delta"]
+            if delta is None:
+                verdict = "not enough data"
+            else:
+                agrees = signature["agrees"]
+                expected = signature["expected"]
+                verdict = f"{delta:+.1f}"
+                if expected:
+                    verdict += ("  (as expected)" if agrees
+                                else f"  (expected {expected} — worth a look)")
+            print(f"{metric:<18}{cells}   {verdict}")
+
+        if args.day:
+            day = parse_ts(args.day).date()
+            print()
+            for metric in metrics:
+                reading = cycle_features.phase_adjusted(store, metric, day)
+                print(reading.describe())
+                if reading.verdicts_disagree:
+                    print("  ^ a phase-blind baseline would flag this; the same "
+                          "phase of your own cycles says it is ordinary")
     return 0
 
 
@@ -241,6 +330,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("status", help="what's in the database").set_defaults(fn=cmd_status)
     sub.add_parser("doctor", help="check credentials and connectivity").set_defaults(fn=cmd_doctor)
+
+    cycle_cmd = sub.add_parser("cycle", help="cycle phase and phase-aware baselines")
+    cycle_cmd.add_argument("--metric", action="append",
+                           help="metric to break down by phase (repeatable)")
+    cycle_cmd.add_argument("--day", help="judge one day against its phase")
+    cycle_cmd.set_defaults(fn=cmd_cycle)
 
     lifts = sub.add_parser("lifts", help="strength progression")
     lifts.add_argument("exercise", nargs="?", help="exact Hevy exercise name")

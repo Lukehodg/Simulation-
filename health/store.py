@@ -218,6 +218,21 @@ class Store:
 
     # -- reading -----------------------------------------------------------
 
+    def replace_table(self, table: str, columns: Sequence[str],
+                      rows: Sequence[Sequence[Any]]) -> int:
+        """Rewrite a derived table wholesale. Derived tables are rebuilt, not
+        migrated: recomputing from cycle_events is cheap and always correct,
+        whereas a half-updated one is silently wrong."""
+        self.db.execute(f"DELETE FROM {table}")
+        if not rows:
+            return 0
+        placeholders = ", ".join("?" for _ in columns)
+        self.db.executemany(
+            f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({placeholders})",
+            [list(row) for row in rows],
+        )
+        return len(rows)
+
     def query(self, sql: str, params: Iterable[Any] | None = None) -> list[tuple]:
         return self.db.execute(sql, list(params) if params else None).fetchall()
 

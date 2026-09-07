@@ -131,6 +131,17 @@ CREATE TABLE IF NOT EXISTS cycle_events (
     PRIMARY KEY (source, local_date, event)
 );
 
+-- Derived: one row per day of every cycle we can reconstruct. Rebuilt from
+-- cycle_events by `health.features.cycle.rebuild`, never written by a source.
+CREATE TABLE IF NOT EXISTS cycle_days (
+    local_date   DATE PRIMARY KEY,
+    cycle_index  INTEGER NOT NULL,   -- 0 is the earliest cycle we can see
+    cycle_day    INTEGER NOT NULL,   -- 1 is the first day of bleeding
+    phase        VARCHAR NOT NULL,   -- menses | follicular | ovulation | luteal
+    cycle_length INTEGER,            -- null while the cycle is still running
+    is_predicted BOOLEAN NOT NULL    -- true once we are past observed data
+);
+
 -- Bookkeeping ---------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS sync_state (

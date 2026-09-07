@@ -90,8 +90,17 @@ def sync_source(store: Store, config: Config, name: str,
 
 def sync_all(store: Store, config: Config, names: list[str] | None = None,
              since: datetime | None = None, full: bool = False) -> list[SyncReport]:
-    return [sync_source(store, config, name, since=since, full=full)
-            for name in (names or list(SOURCES))]
+    reports = [sync_source(store, config, name, since=since, full=full)
+               for name in (names or list(SOURCES))]
+    rebuild_derived(store)
+    return reports
+
+
+def rebuild_derived(store: Store) -> None:
+    """Recompute the derived tables that sit on top of the loaded data."""
+    from .features import cycle as cycle_features
+
+    cycle_features.rebuild(store)
 
 
 def replay(store: Store, config: Config, name: str | None = None) -> list[SyncReport]:
@@ -118,6 +127,7 @@ def replay(store: Store, config: Config, name: str | None = None) -> list[SyncRe
         report.files += 1
         report.add(store.load(records))
 
+    rebuild_derived(store)
     return list(reports.values())
 
 
@@ -134,4 +144,5 @@ def ingest_path(store: Store, config: Config, path: Path,
         report.files += 1
         report.add(store.load(source.parse(landed)))
         store.record_raw(landed, name, "export", datetime.now(timezone.utc), parsed=True)
+    rebuild_derived(store)
     return report
