@@ -27,6 +27,7 @@ Built and tested:
 | **Research** | Europe PMC search returning study design, citations and DOIs |
 | **Daily features** | Robust baselines, deviations, training load, sleep regularity, autocorrelation-corrected correlations |
 | **Agent tools** | 19 MCP tools — the surface Claude actually talks to |
+| **Interface** | A local page on 127.0.0.1, served from the same database |
 
 Next: the Garmin export and `.FIT` parsers, energy availability (which needs
 Garmin's expenditure data), the morning brief as a scheduled job, and n-of-1
@@ -265,6 +266,32 @@ whether a finding applies to you.
 > Verified against a recorded Europe PMC response, not against the live API —
 > the sandbox this was built in blocks outbound requests to it. If the shape
 > has drifted, the failure will be loud and the fix small.
+
+## The interface
+
+```sh
+health serve          # opens http://127.0.0.1:8899
+```
+
+One page: the day's verdict, a readout row with each metric's deviation from
+its own baseline, HRV against its baseline band with the current cycle phase
+shaded, strength trends with their fit, and whatever your last blood panel
+flagged.
+
+It is deliberately a readout rather than a dashboard — rules instead of cards,
+monospaced figures aligned so a column reads at a glance, and uncertainty
+printed next to the figure it qualifies rather than hidden behind a tooltip.
+The verdict line describes what the numbers did; it does not tell you what to
+do about it, because that is not a judgement this data can make on its own.
+
+Before anything is connected it renders a setup checklist with the exact
+command for each source, since an empty database is the first thing you will
+see. Each readout cell does the same individually — a missing metric shows
+what to run rather than a dash.
+
+Standard library only, bound to loopback, opened per request: holding the
+database open would block `health sync` in another terminal, and when a sync
+does hold the file the page says it is busy rather than leaking a lock error.
 
 ## The agent
 

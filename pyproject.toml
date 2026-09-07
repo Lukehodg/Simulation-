@@ -29,6 +29,9 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["health"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"health/web/index.html" = "health/web/index.html"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 filterwarnings = ["error::DeprecationWarning"]

@@ -15,6 +15,7 @@
     health volume [--weeks N]   weekly tonnage by muscle group
     health sql "SELECT ..."     ask the database directly
     health mcp                  serve the tools Claude calls (stdio)
+    health serve                open the interface in a browser
 """
 
 from __future__ import annotations
@@ -170,6 +171,13 @@ def cmd_doctor(args, config) -> int:
             for line in SETUP_HINTS.get(name, []):
                 print(f"     {line}")
     return 1 if problems else 0
+
+
+def cmd_serve(args, config) -> int:
+    from .web import serve
+
+    serve(config, port=args.port, open_browser=not args.no_open)
+    return 0
 
 
 def cmd_mcp(args, config) -> int:
@@ -540,6 +548,12 @@ def build_parser() -> argparse.ArgumentParser:
     volume = sub.add_parser("volume", help="weekly tonnage by muscle group")
     volume.add_argument("--weeks", type=int, default=8)
     volume.set_defaults(fn=cmd_volume)
+
+    serve_cmd = sub.add_parser("serve", help="open the interface in a browser")
+    serve_cmd.add_argument("--port", type=int, default=8899)
+    serve_cmd.add_argument("--no-open", action="store_true",
+                           help="do not open a browser window")
+    serve_cmd.set_defaults(fn=cmd_serve)
 
     sub.add_parser("mcp", help="serve the tools Claude calls").set_defaults(fn=cmd_mcp)
 

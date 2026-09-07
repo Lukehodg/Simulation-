@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>health</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chivo:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --ink:    #101418;
+    --paper:  #F7F8F7;
+    --panel:  #FFFFFF;
+    --soft:   #5A6470;
+    --rule:   #D8DDDA;
+    --hair:   #E9ECEA;
+    --signal: #1F4B99;
+    --warn:   #A9741A;
+    --good:   #2E6E4E;
+    --bad:    #9A3B34;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink: #E6EAEE; --paper: #0E1214; --panel: #131719; --soft: #8894A2;
+      --rule: #262D31; --hair: #1B2124; --signal: #7FA8E8; --warn: #D2A24E;
+      --good: #6BB98C; --bad: #E08A80;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Chivo", -apple-system, BlinkMacSystemFont, sans-serif;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .mono, .num { font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+                font-variant-numeric: tabular-nums; }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 34px 30px 70px; }
+
+  /* ---- masthead ---- */
+  .top { display: flex; justify-content: space-between; align-items: baseline;
+         gap: 20px; border-bottom: 2px solid var(--ink); padding-bottom: 12px; }
+  .top h1 { font-size: 23px; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
+  .top .meta { font-family: "JetBrains Mono", monospace; font-size: 11px;
+               color: var(--soft); letter-spacing: 0.07em; text-transform: uppercase;
+               text-align: right; }
+  .top button {
+    font-family: "JetBrains Mono", monospace; font-size: 11px; letter-spacing: 0.08em;
+    text-transform: uppercase; background: none; color: var(--soft);
+    border: 1px solid var(--rule); padding: 4px 9px; cursor: pointer; margin-left: 10px;
+  }
+  .top button:hover { color: var(--ink); border-color: var(--ink); }
+  .top button:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+
+  /* ---- verdict ---- */
+  .verdict { display: grid; grid-template-columns: 1fr auto; gap: 26px;
+             align-items: start; padding: 20px 0; border-bottom: 1px solid var(--rule); }
+  .verdict h2 { margin: 0 0 4px; font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
+  .verdict p { margin: 0; font-size: 16px; color: var(--soft); max-width: 56ch; }
+  .score { text-align: right; }
+  .score .num { font-size: 40px; font-weight: 500; line-height: 1; letter-spacing: -0.03em;
+                display: block; }
+  .score small { font-family: "JetBrains Mono", monospace; font-size: 10.5px;
+                 letter-spacing: 0.12em; color: var(--soft); text-transform: uppercase;
+                 display: block; margin-top: 6px; }
+
+  /* ---- readout ---- */
+  .readout { display: grid; grid-template-columns: repeat(4, 1fr); }
+  .cell { padding: 16px 14px 16px 0; border-bottom: 1px solid var(--hair); }
+  .cell + .cell { padding-left: 14px; border-left: 1px solid var(--hair); }
+  .cell .k { font-family: "JetBrains Mono", monospace; font-size: 10.5px;
+             letter-spacing: 0.1em; text-transform: uppercase; color: var(--soft); }
+  .cell .v { font-family: "JetBrains Mono", monospace; font-variant-numeric: tabular-nums;
+             font-size: 24px; margin: 5px 0 2px; letter-spacing: -0.02em; }
+  .cell .v u { text-decoration: none; font-size: 12.5px; color: var(--soft); }
+  .cell .d { font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--soft); }
+  .cell .hint { font-family: "JetBrains Mono", monospace; font-size: 10.5px;
+                color: var(--signal); }
+  .up { color: var(--good); } .down { color: var(--bad); } .flat { color: var(--soft); }
+
+  /* ---- sections ---- */
+  section { padding: 20px 0; border-bottom: 1px solid var(--rule); }
+  .head { display: flex; justify-content: space-between; align-items: baseline;
+          gap: 16px; margin-bottom: 12px; }
+  .head h3 { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.02em; }
+  .head .mono { font-size: 11px; color: var(--soft); }
+  .caption { font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--soft);
+             line-height: 1.6; margin: 10px 0 0; }
+
+  .cols { display: grid; grid-template-columns: 1.35fr 1fr; gap: 34px; }
+  .row { display: grid; grid-template-columns: 1fr auto; gap: 12px; padding: 9px 0;
+         border-bottom: 1px solid var(--hair); align-items: baseline; }
+  .row:last-of-type { border-bottom: none; }
+  .row .name { font-size: 14px; }
+  .row .name em { font-style: normal; color: var(--soft); font-size: 12.5px; }
+  .row .fig { font-family: "JetBrains Mono", monospace; font-variant-numeric: tabular-nums;
+              font-size: 13px; }
+  .colhead { font-family: "JetBrains Mono", monospace; font-size: 10.5px;
+             letter-spacing: 0.1em; text-transform: uppercase; color: var(--soft);
+             padding-bottom: 8px; border-bottom: 1px solid var(--rule); margin-bottom: 2px; }
+  .tag { font-family: "JetBrains Mono", monospace; font-size: 10px; letter-spacing: 0.08em;
+         text-transform: uppercase; padding: 2px 6px; border: 1px solid currentColor;
+         margin-left: 6px; }
+  .tag.low { color: var(--warn); } .tag.high { color: var(--bad); }
+  .tag.stale { color: var(--soft); }
+
+  /* ---- empty / setup ---- */
+  .setup { padding: 26px 0; }
+  .setup h2 { font-size: 19px; margin: 0 0 6px; }
+  .setup p { color: var(--soft); margin: 0 0 18px; max-width: 60ch; }
+  .step { display: grid; grid-template-columns: 22px 1fr; gap: 12px; padding: 11px 0;
+          border-bottom: 1px solid var(--hair); align-items: baseline; }
+  .step .n { font-family: "JetBrains Mono", monospace; font-size: 12px; color: var(--soft); }
+  .step .what { font-size: 14.5px; }
+  .step code { font-family: "JetBrains Mono", monospace; font-size: 12.5px;
+               color: var(--signal); display: block; margin-top: 3px; }
+  .missing { font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--soft);
+             padding-top: 14px; }
+  .missing b { color: var(--warn); font-weight: 500; }
+
+  footer { font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--soft);
+           padding-top: 18px; line-height: 1.7; }
+  .err { color: var(--bad); font-family: "JetBrains Mono", monospace; font-size: 13px; }
+
+  @media (max-width: 820px) {
+    .readout { grid-template-columns: repeat(2, 1fr); }
+    .cell + .cell { border-left: none; padding-left: 0; }
+    .cols { grid-template-columns: 1fr; gap: 22px; }
+    .wrap { padding: 24px 18px 50px; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="wrap" id="app">
+  <div class="top">
+    <h1 id="date">…</h1>
+    <div class="meta"><span id="sync">reading the database</span>
+      <button type="button" id="refresh">refresh</button></div>
+  </div>
+  <div id="body"></div>
+  <footer id="foot"></footer>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const el = (tag, cls, html) => {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (html !== undefined) node.innerHTML = html;
+  return node;
+};
+const fmt = (v, places = 1) =>
+  v === null || v === undefined ? "—" : (typeof v === "number" ? String(Number(v.toFixed(places))) : v);
+const sig = (v) =>
+  v === null || v === undefined ? "—" : String(Number(v.toPrecision(4)));
+
+function zLabel(z, n) {
+  if (z === null || z === undefined) return `<span class="flat">no baseline yet</span>`;
+  const cls = Math.abs(z) < 1 ? "flat" : (z > 0 ? "up" : "down");
+  return `<span class="${cls}">${z > 0 ? "+" : ""}${z.toFixed(1)} SD</span> · ${n}d`;
+}
+
+/* ---------- the chart: 28 days, its baseline band, and the phase ---------- */
+function chart(data) {
+  const points = data.points.filter(p => p.value !== null);
+  if (points.length < 2) return el("p", "caption", "Not enough days to draw yet.");
+
+  const w = 900, h = 140, pad = 18;
+  const values = points.map(p => p.value);
+  const min = Math.min(...values), max = Math.max(...values), span = (max - min) || 1;
+  const x = i => pad + (i / (points.length - 1)) * (w - pad * 2);
+  const y = v => pad + (1 - (v - min) / span) * (h - pad * 2);
+
+  let band = "";
+  if (data.usable) {
+    const top = y(data.median + data.mad), bottom = y(data.median - data.mad);
+    band = `<rect x="${pad}" y="${top}" width="${w - pad * 2}" height="${bottom - top}"
+                  fill="var(--soft)" opacity="0.13"></rect>
+            <line x1="${pad}" y1="${y(data.median)}" x2="${w - pad}" y2="${y(data.median)}"
+                  stroke="var(--soft)" stroke-width="1" stroke-dasharray="4 4"></line>`;
+  }
+
+  // Shade the run of days sharing the final day's cycle phase.
+  let phase = "";
+  const current = points[points.length - 1].phase;
+  if (current) {
+    let from = points.length - 1;
+    while (from > 0 && points[from - 1].phase === current) from--;
+    phase = `<rect x="${x(from)}" y="${pad - 8}" width="${w - pad - x(from)}"
+                   height="${h - pad * 2 + 16}" fill="var(--signal)" opacity="0.06"></rect>
+             <text x="${x(from) + 8}" y="${pad + 2}" font-size="11" fill="var(--signal)"
+                   font-family="JetBrains Mono, monospace">${current.toUpperCase()}</text>`;
+  }
+
+  const line = points.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)} ${y(p.value).toFixed(1)}`).join(" ");
+  const hi = values.indexOf(max), lo = values.indexOf(min);
+  const lastX = x(points.length - 1), lastY = y(values[values.length - 1]);
+
+  const box = el("div");
+  box.innerHTML = `
+    <svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" role="img"
+         aria-label="${data.metric} over ${points.length} days, latest ${values[values.length - 1]} ${data.unit}">
+      ${phase}${band}
+      <path d="${line}" fill="none" stroke="var(--signal)" stroke-width="2"></path>
+      <circle cx="${lastX}" cy="${lastY}" r="4" fill="var(--signal)"></circle>
+      <text x="${x(hi) + 7}" y="${y(max) + 4}" font-size="11" fill="var(--soft)"
+            font-family="JetBrains Mono, monospace">${fmt(max)}</text>
+      <text x="${x(lo) + 7}" y="${y(min) + 4}" font-size="11" fill="var(--soft)"
+            font-family="JetBrains Mono, monospace">${fmt(min)}</text>
+      <text x="${lastX - 8}" y="${lastY - 11}" font-size="11.5" text-anchor="end"
+            fill="var(--ink)" font-family="JetBrains Mono, monospace">${fmt(values[values.length - 1])} ${data.unit}</text>
+    </svg>`;
+  return box;
+}
+
+/* ---------- modules ---------- */
+function readout(items, load) {
+  const grid = el("div", "readout");
+  items.forEach(item => {
+    const cell = el("div", "cell");
+    cell.appendChild(el("div", "k", item.label));
+    cell.appendChild(el("div", "v", item.value === null || item.value === undefined
+      ? "—" : `${item.value}${item.unit ? `<u> ${item.unit}</u>` : ""}`));
+    cell.appendChild(el("div", item.value === null && item.hint ? "hint" : "d",
+      item.value === null || item.value === undefined
+        ? (item.hint || "no data") : zLabel(item.z, item.baseline_n)));
+    grid.appendChild(cell);
+  });
+  const cell = el("div", "cell");
+  cell.appendChild(el("div", "k", "Load 7d:28d"));
+  cell.appendChild(el("div", "v", load.ratio === null ? "—" : load.ratio.toFixed(2)));
+  cell.appendChild(el("div", "d", load.ratio === null ? "no training yet"
+    : load.summary.split(":")[0]));
+  grid.appendChild(cell);
+  return grid;
+}
+
+function strength(rows) {
+  const box = el("div");
+  box.appendChild(el("div", "colhead", "Strength · estimated 1RM"));
+  if (!rows.length) {
+    box.appendChild(el("p", "caption", "No lifting data yet.<br>health sync hevy"));
+    return box;
+  }
+  rows.forEach(lift => {
+    const row = el("div", "row");
+    row.appendChild(el("div", "name",
+      `${lift.exercise} <em>· ${lift.sessions} session${lift.sessions === 1 ? "" : "s"}</em>`));
+    let fig;
+    if (lift.trend === null || lift.trend === undefined) {
+      fig = `<span class="flat">${lift.note ? "too few sessions" : "—"}</span>`;
+    } else {
+      const cls = lift.trend > 0.05 ? "up" : lift.trend < -0.05 ? "down" : "flat";
+      const arrow = lift.trend > 0 ? "↑" : lift.trend < 0 ? "↓" : "→";
+      fig = `<span class="${cls}">${arrow} ${Math.abs(lift.trend).toFixed(2)} kg/wk</span>` +
+            ` · r² ${lift.r2 === null ? "—" : lift.r2.toFixed(2)}`;
+    }
+    if (lift.stale) fig += `<span class="tag stale">stale</span>`;
+    row.appendChild(el("div", "fig", fig));
+    box.appendChild(row);
+  });
+  return box;
+}
+
+function bloods(data) {
+  const box = el("div");
+  box.appendChild(el("div", "colhead",
+    data.results.length
+      ? `Bloods · ${new Date(data.date + "T00:00").toLocaleDateString(undefined,
+          { day: "numeric", month: "short" })}`
+      : "Bloods"));
+  if (!data.results.length) {
+    box.appendChild(el("p", "caption", `No panels yet.<br>${data.hint}`));
+    return box;
+  }
+  data.results.forEach(result => {
+    const row = el("div", "row");
+    row.appendChild(el("div", "name", result.label));
+    const tag = result.flag === "low" || result.flag === "high"
+      ? `<span class="tag ${result.flag}">${result.flag}</span>` : "";
+    row.appendChild(el("div", "fig",
+      `${sig(result.value)} ${result.unit || ""}${tag}`));
+    box.appendChild(row);
+  });
+  const flagged = data.flagged || 0;
+  box.appendChild(el("p", "caption",
+    `${flagged} of ${data.total} outside range` +
+    (data.results.some(r => r.range_source === "generic")
+      ? " · some ranges are generic, not your lab's" : "")));
+  return box;
+}
+
+function setup(sync) {
+  const box = el("div", "setup");
+  box.appendChild(el("h2", null, "Nothing synced yet."));
+  box.appendChild(el("p", null,
+    "Connect a source and this page fills in. Everything stays on this machine."));
+  const steps = [
+    ["Hevy", "Copy the key from hevy.com/settings?developer", "health sync hevy"],
+    ["WHOOP", "Create an app at developer.whoop.com, redirect http://localhost:8765/callback",
+     "health auth whoop &amp;&amp; health sync whoop"],
+    ["Apple Health", "Health Auto Export → iCloud Drive, then point HEALTH_APPLE_EXPORT_DIR at it",
+     "health sync apple_health"],
+    ["Blood tests", "A PDF report or a CSV", "health labs add report.pdf"],
+  ];
+  steps.forEach(([name, why, command], index) => {
+    const step = el("div", "step");
+    step.appendChild(el("div", "n", String(index + 1)));
+    step.appendChild(el("div", "what", `<b>${name}</b> — ${why}<code>${command}</code>`));
+    box.appendChild(step);
+  });
+  return box;
+}
+
+/* ---------- render ---------- */
+function render(data) {
+  const body = $("body");
+  body.innerHTML = "";
+
+  if (data.error) {
+    $("date").textContent = "health";
+    body.appendChild(el("p", "err", data.error));
+    return;
+  }
+
+  $("date").textContent = data.date_label;
+  const connected = data.sync.connected.filter(s => s !== "labs");
+  $("sync").textContent = connected.length
+    ? `synced · ${connected.join(", ")}` : "no sources connected";
+
+  if (data.empty) {
+    body.appendChild(setup(data.sync));
+    $("foot").textContent = "health serve · 127.0.0.1 only";
+    return;
+  }
+
+  if (data.showing_older_day) {
+    body.appendChild(el("p", "caption",
+      `Nothing has synced for today — showing ${data.showing_older_day}, the most recent day with data.`));
+  }
+
+  const verdict = el("div", "verdict");
+  const left = el("div");
+  left.appendChild(el("h2", null, data.verdict.headline));
+  left.appendChild(el("p", null, data.verdict.detail));
+  verdict.appendChild(left);
+  const recovery = data.readout.find(r => r.metric === "recovery_score");
+  if (recovery && recovery.value !== null && recovery.value !== undefined) {
+    const score = el("div", "score");
+    score.innerHTML = `<span class="num">${recovery.value}</span><small>recovery</small>`;
+    verdict.appendChild(score);
+  }
+  body.appendChild(verdict);
+
+  body.appendChild(readout(data.readout.filter(r => r.metric !== "recovery_score"), data.load));
+
+  const strip = el("section");
+  const head = el("div", "head");
+  head.appendChild(el("h3", null, `${data.chart.metric} · ${data.chart.points.length} days against baseline`));
+  const cycle = data.cycle || {};
+  head.appendChild(el("div", "mono", cycle.cycle_day
+    ? `day ${cycle.cycle_day} · ${cycle.phase}` : ""));
+  strip.appendChild(head);
+  strip.appendChild(chart(data.chart));
+  strip.appendChild(el("p", "caption", data.chart.usable
+    ? `Band is the ${data.chart.points.length}-day median ±1 MAD. The day being judged is not part of its own baseline.`
+    : "Not enough history for a baseline band yet."));
+  body.appendChild(strip);
+
+  const cols = el("section", "cols");
+  cols.appendChild(strength(data.strength));
+  cols.appendChild(bloods(data.bloods));
+  body.appendChild(cols);
+
+  const missing = data.sync.missing;
+  $("foot").innerHTML = missing.length
+    ? `not connected: <b>${missing.join(", ")}</b> — ${missing.map(s => data.sync.hints[s]).join(" · ")}`
+    : "all sources connected · 127.0.0.1 only";
+}
+
+async function load() {
+  try {
+    const response = await fetch("/api/today");
+    render(await response.json());
+  } catch (error) {
+    render({ error: String(error) });
+  }
+}
+
+$("refresh").addEventListener("click", load);
+window.addEventListener("focus", load);
+load();
+</script>
+</body>
+</html>
