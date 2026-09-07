@@ -1,0 +1,35 @@
+{"data": {
+  "metrics": [
+    {"name": "step_count", "units": "count", "data": [
+      {"date": "2026-09-01 08:00:00 +0100", "qty": 3200, "source": "Garmin Connect"},
+      {"date": "2026-09-01 18:00:00 +0100", "qty": 5100, "source": "Garmin Connect"},
+      {"date": "2026-09-02 09:00:00 +0100", "qty": 2000, "source": "Garmin Connect"}]},
+    {"name": "resting_heart_rate", "units": "count/min", "data": [
+      {"date": "2026-09-01 07:00:00 +0100", "qty": 54},
+      {"date": "2026-09-01 22:00:00 +0100", "qty": 56}]},
+    {"name": "heart_rate_variability", "units": "ms", "data": [
+      {"date": "2026-09-01 04:00:00 +0100", "qty": 61.2}]},
+    {"name": "blood_oxygen_saturation", "units": "%", "data": [
+      {"date": "2026-09-01 04:00:00 +0100", "qty": 0.972}]},
+    {"name": "weight_body_mass", "units": "kg", "data": [
+      {"date": "2026-09-01 07:30:00 +0100", "qty": 63.4},
+      {"date": "2026-09-01 20:30:00 +0100", "qty": 64.1}]},
+    {"name": "dietary_energy", "units": "kcal", "data": [
+      {"date": "2026-09-01 09:00:00 +0100", "qty": 480, "source": "MyFitnessPal"},
+      {"date": "2026-09-01 13:00:00 +0100", "qty": 720, "source": "MyFitnessPal"},
+      {"date": "2026-09-01 19:00:00 +0100", "qty": 910, "source": "MyFitnessPal"}]},
+    {"name": "protein", "units": "g", "data": [
+      {"date": "2026-09-01 13:00:00 +0100", "qty": 62, "source": "MyFitnessPal"},
+      {"date": "2026-09-01 19:00:00 +0100", "qty": 58, "source": "MyFitnessPal"}]},
+    {"name": "sleep_analysis", "units": "hr", "data": [
+      {"date": "2026-09-01 06:25:00 +0100",
+       "sleepStart": "2026-08-31 23:40:00 +0100", "sleepEnd": "2026-09-01 07:25:00 +0100",
+       "inBed": 7.75, "asleep": 7.1, "core": 4.0, "deep": 1.5, "rem": 1.6, "awake": 0.5,
+       "source": "Garmin Connect"}]},
+    {"name": "menstrual_flow", "units": "", "data": [
+      {"date": "2026-09-01 00:00:00 +0100", "value": "medium", "cycle_start": true},
+      {"date": "2026-09-02 00:00:00 +0100", "value": "light", "cycle_start": false},
+      {"date": "2026-09-05 00:00:00 +0100", "value": "none", "cycle_start": false}]}
+  ],
+  "workouts": []
+}}

@@ -1,0 +1,20 @@
+{"page": 1, "page_count": 1, "workouts": [
+  {"id": "hw-001", "title": "Lower A", "description": "",
+   "start_time": "2026-09-01T17:05:00Z", "end_time": "2026-09-01T18:20:00Z",
+   "updated_at": "2026-09-01T18:25:00Z", "created_at": "2026-09-01T17:05:00Z",
+   "exercises": [
+     {"index": 0, "title": "Romanian Deadlift (Barbell)",
+      "exercise_template_id": "rdl-tmpl", "superset_id": null, "notes": "",
+      "sets": [
+        {"index": 0, "type": "warmup", "weight_kg": 40, "reps": 8, "rpe": null,
+         "distance_meters": null, "duration_seconds": null},
+        {"index": 1, "type": "normal", "weight_kg": 82.5, "reps": 6, "rpe": 8,
+         "distance_meters": null, "duration_seconds": null},
+        {"index": 2, "type": "normal", "weight_kg": 82.5, "reps": 6, "rpe": 9,
+         "distance_meters": null, "duration_seconds": null}]},
+     {"index": 1, "title": "Bulgarian Split Squat",
+      "exercise_template_id": "bss-tmpl", "superset_id": null, "notes": "",
+      "sets": [
+        {"index": 0, "type": "normal", "weight_kg": 20, "reps": 10, "rpe": 8,
+         "distance_meters": null, "duration_seconds": null}]}]}
+]}

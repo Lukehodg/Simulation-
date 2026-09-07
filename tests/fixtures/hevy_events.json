@@ -1,0 +1,13 @@
+{"page": 1, "page_count": 1, "events": [
+  {"type": "updated", "workout": {
+     "id": "hw-001", "title": "Lower A (corrected)",
+     "start_time": "2026-09-01T17:05:00Z", "end_time": "2026-09-01T18:20:00Z",
+     "exercises": [
+       {"index": 0, "title": "Romanian Deadlift (Barbell)",
+        "exercise_template_id": "rdl-tmpl",
+        "sets": [
+          {"index": 0, "type": "warmup", "weight_kg": 40, "reps": 8},
+          {"index": 1, "type": "normal", "weight_kg": 85, "reps": 6, "rpe": 8},
+          {"index": 2, "type": "normal", "weight_kg": 85, "reps": 6, "rpe": 9}]}]}},
+  {"type": "deleted", "id": "hw-999", "deleted_at": "2026-09-02T09:00:00Z"}
+]}

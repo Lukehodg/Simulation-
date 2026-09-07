@@ -1,36 +1,26 @@
-[Ll]ibrary/
-[Tt]emp/
-[Oo]bj/
-[Bb]uild/
-[Bb]uilds/
-[Ll]ogs/
-[Uu]ser[Ss]ettings/
-[Mm]emoryCaptures/
-[Rr]ecordings/
+# Your health data never goes in git.
+data/
+*.duckdb
+*.duckdb.wal
+*.fit
+*.FIT
+exports/
 
-*.csproj
-*.unityproj
-*.sln
-*.suo
-*.user
-*.userprefs
-*.pidb
-*.booproj
-*.svd
-*.pdb
-*.mdb
-*.opendb
-*.VC.db
+# Credentials
+.env
+secrets.json
+tokens/
 
-.vs/
-.idea/
-.vscode/
-.gradle/
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
 
-*.apk
-*.aab
-*.unitypackage
-*.app
-
-sysinfo.txt
-crashlytics-build.properties
+# OS
+.DS_Store

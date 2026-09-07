@@ -1,127 +1,131 @@
-# CardioVR — cardiology procedural trainer
+# health
 
-A VR simulator for **interventional cardiology procedural skills**. The first
-scenario is a diagnostic coronary angiogram from right femoral access: track a
-catheter up the aorta, engage each coronary ostium by feel and torque, image both
-systems, and close — while the simulator counts every second of screening, every
-millilitre of contrast, and every millimetre of vessel wall you traumatise.
+A local-first personal health data warehouse. It pulls Garmin, WHOOP,
+MyFitnessPal and Hevy into one DuckDB file on your own machine, so that
+questions spanning all four — *does my training load explain this week's
+sleep, or is it my cycle?* — can actually be asked.
 
-> **Training use only.** The physiology and anatomy here are schematic models
-> tuned to teach recognition, sequencing and handling. They are not derived from
-> patient imaging, have not been clinically validated, and must not be used to
-> guide the care of any real patient.
+Nothing leaves the machine. There is no server, no account, and no cloud
+component.
 
-## Why VR
+[`PLAN.md`](PLAN.md) is the design: why each source is reached the way it is,
+what the analysis layer computes, and what comes next.
 
-The hard part of catheter work isn't knowing the steps — it's the hands. Advancing
-against resistance, torquing a shaft to rotate a tip you can only see in
-projection, and feeling when to stop. So the interaction is built around real
-motion: you grip the shaft and **push, pull and twist**. Insertion is hand travel
-along the shaft axis; roll is wrist rotation about it.
+## Status
 
-The detail that makes it VR rather than a game on a headset: your grip is a fixed
-point *on the shaft*, so pushing carries your hand toward the sheath, and when it
-arrives you have run out of travel and must **release and re-grip further back** —
-exactly as in the lab. Put a second hand on the shaft to steady it and the tip
-tracks torque more faithfully and buckles less.
+Built and tested:
 
-There are two devices on that shaft, coaxially: catheter from the sheath to the
-hub, bare guidewire beyond it. So **where you take hold decides what you move** —
-no mode, no toggle, just the place your hand lands.
-
-Stack: **Unity 2022.3 LTS · OpenXR · XR Interaction Toolkit · Quest 3 standalone**.
-See [docs/VR_SETUP.md](docs/VR_SETUP.md) for the rationale and the build steps.
-
-## What the simulation models
-
-| System | Behaviour |
+| | |
 |---|---|
-| **Vascular tree** | Graph of centreline segments (femoral → iliac → aorta → arch → root → coronaries) with per-segment radius, tortuosity and stenosis |
-| **Navigation** | Tip advances along centrelines; branches are entered only when shaft **roll aligns with the ostium** within tolerance — otherwise the catheter buckles |
-| **Resistance** | Friction scaling with inserted length and cumulative tortuosity, plus a spike on buckling or lumen mismatch |
-| **Haemodynamics** | HR, BP, SpO₂ and rhythm drifting toward targets moved by vagal response, contrast load, ischaemia and blood loss |
-| **Complications** | Per-vessel trauma accumulates and converts to dissection, then perforation; ostial dwell causes damping and ischaemia; unpurged lines cause air embolism |
-| **Dose** | Screening time and cumulative mGy, with steep angulation costing more |
-| **Assessment** | Every step, complication and overrun recorded, scored out of 100 with a graded debrief |
-| **Wire-led technique** | The catheter is railed to the guidewire's path while the wire leads, so it cannot engage an ostium until the wire is pulled back — and running on past the wire tip is possible, but the vessel remembers |
-| **Fluoroscopy** | A real orthographic projection through additively-blended radiopaque meshes, inverted to film; grain scales inversely with dose rate, and releasing the pedal leaves last image hold |
+| **Storage** | DuckDB schema, canonical views, idempotent loading, replay from raw |
+| **WHOOP** | OAuth 2.0 flow, token refresh, incremental paging, sleep / recovery / cycle / workout parsing |
+| **Hevy** | Full history paging, incremental events feed, set-level parsing, upstream edits and deletions |
+| **Apple Health** | Health Auto Export JSON — carries Garmin dailies, MyFitnessPal macros, sleep and period logs |
 
-Trauma is **cumulative and does not heal**. Rough handling early costs the trainee
-later — that's the teaching point, not a bug.
+Next: the Garmin export and `.FIT` parsers, then the features layer
+(baselines, training load, energy availability), the cycle model, and the MCP
+tool server the agent talks to.
 
-## Browser preview
+## Setup
 
-`preview/index.html` is a self-contained, playable preview of the whole procedure —
-the same anatomy dataset and the same navigation rules as the Unity build, rendered
-on canvas. Open the file in any browser. It exists so the interaction model can be
-reviewed by clinicians without a headset or a Unity licence.
-
-`W`/`S` advance and withdraw · `A`/`D` torque · `Space` screen · `C` inject · `F` hold
-
-The projection maths is real: the C-arm angles rotate the vessel tree, so LAO 40 /
-CRA 20 genuinely opens the left main bifurcation the way it does in the lab.
-
-## Layout
-
-```
-Assets/
-  Scenarios/
-    aorto-coronary-tree.json              anatomy dataset (editable outside Unity)
-    diagnostic-coronary-angiography.json  procedure script
-  Shaders/         Radiopaque, FluoroDisplay
-  Scripts/
-    Vasculature/   VesselSegment, VesselNetwork, VesselNetworkLoader, VesselMeshBuilder
-    Catheter/      CatheterState, CatheterNavigator, CatheterProfile,
-                   CoaxialSystem, CatheterRenderer
-    Interaction/   ICoaxialInput, CoaxialShaftInteractable, HapticDriver,
-                   ContrastSyringe, FluoroPedal, ProjectionPresetButton,
-                   DesktopCoaxialInput
-    Physiology/    PatientVitals
-    Complications/ ComplicationSystem
-    Core/          ProcedureDefinition, ProcedureLoader, ProcedureRunner
-    Assessment/    PerformanceRecorder, DebriefReport
-    UI/            FluoroscopyController, CArmRig, PatientMonitorRenderer
-    XR/            XRSessionBootstrap
-    Editor/        CathLabBuilder
+```sh
+make install          # uv venv + editable install
+cp .env.example .env  # then fill in, or use the macOS Keychain
+health init
 ```
 
-The anatomy and the procedure are **data, not code** — a clinician can add a
-vessel, change a stenosis, or rewrite the step list in JSON without touching C#.
+Credentials are read from the environment, then the macOS Keychain, then
+`~/.config/health/secrets.json` (0600). None of them are ever read from this
+repository, and `data/` is gitignored.
 
-## Getting started
+```sh
+security add-generic-password -a health -s HEVY_API_KEY -w 'your-key'
+```
 
-1. Open the project in **Unity 2022.3 LTS** and let packages resolve.
-2. Import the XRI **Starter Assets** sample and enable **OpenXR** — see
-   [docs/VR_SETUP.md](docs/VR_SETUP.md) for the exact settings.
-3. Run **`CardioVR → Build Cath Lab Scene`** from the menu bar.
+Then connect each source:
 
-That generates `Assets/Scenes/CathLab.unity` with the room, the anatomy, the
-C-arm, the monitors and every component reference wired up. The scene is
-generated rather than committed because a Unity scene file is a wall of GUIDs
-nobody can review — this way the layout is code you can read in a diff, and an
-anatomy change is one menu click away from being in the scene.
+```sh
+health auth whoop     # one-time browser consent; tokens refresh themselves
+health doctor         # checks every credential and endpoint, one line each
+health sync           # fetch everything new and load it
+health status         # what's in the database, and how fresh
+```
 
-No headset? Swap the `CoaxialSystem`'s input source for `DesktopCoaxialInput`
-(W/S advance, A/D torque, Tab to switch between wire and catheter), or just open
-`preview/index.html`.
+### WHOOP
 
-## Extending it
+Create a free app at [developer.whoop.com](https://developer.whoop.com) and
+register the redirect URI **exactly** as `http://localhost:8765/callback`.
+Put the client ID and secret in the Keychain as `WHOOP_CLIENT_ID` and
+`WHOOP_CLIENT_SECRET`, then run `health auth whoop`.
 
-- **New anatomy** — add segments to the JSON. `ostiumRollDegrees` is how much
-  torque from neutral engages that branch; `ostiumRollToleranceDegrees` is how
-  forgiving it is. Tight tolerance on a small vessel makes it genuinely hard.
-- **New procedures** — write another procedure JSON. The step goals cover access,
-  navigation, ostial engagement, contrast, C-arm angulation, withdrawal,
-  haemostasis and treating instability.
-- **New catheters** — a `CatheterProfile` asset. French size drives lumen fit,
-  `torqueResponse` drives how faithfully the tip follows the shaft, and
-  `intendedOstiaIds` marks what the shape is designed for.
+### Hevy
 
-## Roadmap
+Hevy Pro only. Grab the key from `hevy.com/settings?developer` and store it as
+`HEVY_API_KEY`.
 
-- Contrast opacification in the 3D fluoroscopy path (the preview already does it)
-- Blocking contrast injection while the wire is still through the catheter tip
-- Porting the guidewire workflow into the browser preview, which is still single-catheter
-- Radial access as an alternative route, with subclavian tortuosity
-- Instructor mode: inject a complication mid-run and grade the response
-- Session export for review across a cohort
+### Apple Health (this is also how Garmin and MyFitnessPal arrive)
+
+Garmin has no personal API — its developer programme requires a legal entity,
+and the library every unofficial client depended on was deprecated in March
+2026. So Garmin Connect writes into Apple Health instead, alongside your
+MyFitnessPal macros and your period logs, and
+[Health Auto Export](https://apps.apple.com/us/app/health-auto-export-json-csv/id1115567069)
+drops that as JSON into iCloud Drive on a schedule.
+
+Point `HEALTH_APPLE_EXPORT_DIR` at the folder it writes to, and `health sync`
+picks up anything new. To load a file by hand:
+
+```sh
+health ingest ~/Downloads/HealthAutoExport-2026-09-01.json
+```
+
+Body Battery, HRV status, training readiness and training load do **not** come
+through this route — Garmin keeps them inside Connect. Those arrive with the
+Garmin data export and the `.FIT` files off the watch.
+
+## Asking it things
+
+```sh
+health sql "SELECT local_date, hrv, resting_hr, recovery, sleep_min FROM daily
+            ORDER BY local_date DESC LIMIT 14"
+```
+
+`daily` is the convenience pivot; `daily_metrics` is one row per metric per day
+from the highest-priority source that recorded it; `observations` is everything
+from everywhere, which is what you query when comparing two devices.
+
+## How it's built
+
+```
+sources/  fetch (network, impure) and parse (pure) — deliberately separable
+raw/      every payload ever received, immutable, never edited
+DuckDB    normalised tables, upserted on each row's natural key
+views     canonical series, daily pivot, estimated 1RM
+```
+
+Two rules do most of the work:
+
+**Raw is sacred.** Every payload lands on disk before anything interprets it,
+and parsers are pure functions of those bytes. When a parser turns out to be
+wrong, `health replay` rebuilds every table from scratch — no re-downloading a
+year of history that an API may no longer be willing to give you.
+
+**Writes are idempotent.** Every table has a natural key and every write is an
+upsert, so syncing twice, replaying, and re-fetching an overlap window all
+converge on the same database. Syncs deliberately re-fetch a few days: WHOOP
+re-scores a night hours later, and Hevy workouts get edited after the session.
+
+One thing is deliberately *not* unified. WHOOP reports HRV as RMSSD during
+slow-wave sleep; Apple reports SDNN. They are different numbers measuring
+different things, so they keep separate metric names and are never averaged
+together. Comparisons across devices z-score within source.
+
+## Tests
+
+```sh
+make test
+```
+
+The suite covers the storage guarantees (idempotency, upstream deletions,
+source priority), each parser against realistic payloads, and the end-to-end
+promise that dropping the database and replaying `raw/` reproduces it exactly.
