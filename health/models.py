@@ -80,6 +80,16 @@ class StrengthSet(_Base):
     rpe: float | None = None
 
 
+class ExerciseTemplate(_Base):
+    source: str
+    template_id: str
+    title: str | None = None
+    primary_muscle: str | None = None
+    secondary_muscles: str | None = None
+    equipment: str | None = None
+    is_custom: bool | None = None
+
+
 class NutritionDay(_Base):
     source: str
     local_date: date
@@ -123,6 +133,7 @@ class Records:
     sleeps: list[Sleep] = field(default_factory=list)
     workouts: list[Workout] = field(default_factory=list)
     strength_sets: list[StrengthSet] = field(default_factory=list)
+    exercise_templates: list[ExerciseTemplate] = field(default_factory=list)
     nutrition_days: list[NutritionDay] = field(default_factory=list)
     nutrition_items: list[NutritionItem] = field(default_factory=list)
     cycle_events: list[CycleEvent] = field(default_factory=list)

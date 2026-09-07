@@ -21,8 +21,9 @@ Built and tested:
 | **WHOOP** | OAuth 2.0 flow, token refresh, incremental paging, sleep / recovery / cycle / workout parsing |
 | **Hevy** | Full history paging, incremental events feed, set-level parsing, upstream edits and deletions |
 | **Apple Health** | Health Auto Export JSON — carries Garmin dailies, MyFitnessPal macros, sleep and period logs |
+| **Strength analysis** | Estimated 1RM trends with their fit, weekly tonnage by muscle group, stale-lift detection |
 
-Next: the Garmin export and `.FIT` parsers, then the features layer
+Next: the Garmin export and `.FIT` parsers, then the rest of the features layer
 (baselines, training load, energy availability), the cycle model, and the MCP
 tool server the agent talks to.
 
@@ -83,6 +84,28 @@ Body Battery, HRV status, training readiness and training load do **not** come
 through this route — Garmin keeps them inside Connect. Those arrive with the
 Garmin data export and the `.FIT` files off the watch.
 
+## Strength
+
+```sh
+health lifts                          # every exercise: best e1RM, trend, staleness
+health lifts "Squat (Barbell)"        # one lift, session by session
+health volume --weeks 8               # weekly tonnage by muscle group
+```
+
+```
+exercise                     muscle       last          n  best e1RM  trend
+Bench Press (Barbell)        chest        2026-09-03   14    76.5 kg  up 1.67 kg/week over 8 sessions (r²=0.85)
+Overhead Press (Barbell)     shoulders    2026-09-03   14    45.0 kg  down 0.64 kg/week over 8 sessions (r²=0.28)
+Pull Up                      lats         2026-08-06    9    17.4 kg  up 1.77 kg/week over 8 sessions (r²=0.88)  (stale)
+```
+
+Every trend carries its sample size and r², because a confident-looking
+"+2.1 kg/week" fitted to three sessions is worse than no answer at all. Sets
+above 12 reps count toward volume but are excluded from strength estimates —
+Epley is fitted to low-rep work and flatters endurance sets into fake PRs.
+Exercises with no Hevy template appear as `unmapped` in the volume table rather
+than disappearing from it.
+
 ## Asking it things
 
 ```sh
@@ -100,7 +123,7 @@ from everywhere, which is what you query when comparing two devices.
 sources/  fetch (network, impure) and parse (pure) — deliberately separable
 raw/      every payload ever received, immutable, never edited
 DuckDB    normalised tables, upserted on each row's natural key
-views     canonical series, daily pivot, estimated 1RM
+views     canonical series, daily pivot, working sets, session bests
 ```
 
 Two rules do most of the work:

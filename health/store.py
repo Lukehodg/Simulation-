@@ -43,6 +43,11 @@ TABLES: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
          "exercise_id", "set_type", "weight_kg", "reps", "distance_m", "duration_s", "rpe",
          "ingested_at"),
     ),
+    "exercise_templates": (
+        ("source", "template_id"),
+        ("source", "template_id", "title", "primary_muscle", "secondary_muscles",
+         "equipment", "is_custom", "ingested_at"),
+    ),
     "nutrition_days": (
         ("source", "local_date"),
         ("source", "local_date", "kcal", "protein_g", "carbs_g", "fat_g", "fibre_g",
@@ -65,6 +70,7 @@ _RECORD_TABLES = {
     "sleeps": "sleeps",
     "workouts": "workouts",
     "strength_sets": "strength_sets",
+    "exercise_templates": "exercise_templates",
     "nutrition_days": "nutrition_days",
     "nutrition_items": "nutrition_items",
     "cycle_events": "cycle_events",

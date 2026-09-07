@@ -7,6 +7,8 @@
     health replay [source]      rebuild every table from raw/, no network
     health status               what's in the database, and how fresh
     health doctor               check credentials and connectivity
+    health lifts [EXERCISE]     strength progression, or one exercise's history
+    health volume [--weeks N]   weekly tonnage by muscle group
     health sql "SELECT ..."     ask the database directly
 """
 
@@ -17,6 +19,9 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .features import (
+    exercise_summary, progression, session_history, stale_lifts, weekly_volume,
+)
 from .config import load_config
 from .secrets import MissingSecret
 from .sources import SOURCES
@@ -145,6 +150,68 @@ def cmd_sql(args, config) -> int:
     return 0
 
 
+def cmd_lifts(args, config) -> int:
+    with _store(config, read_only=True) as store:
+        if args.exercise:
+            history = session_history(store, args.exercise, limit=args.limit)
+            if not history:
+                print(f"No working sets recorded for {args.exercise!r}.")
+                print("Names must match Hevy's exactly — try `health lifts` for the list.")
+                return 1
+            result = progression(store, args.exercise, window=args.window)
+            print(f"{result.exercise}\n{result.describe()}")
+            if result.best_e1rm:
+                since = result.days_since_best
+                ago = "today" if since == 0 else f"{since} days ago"
+                print(f"best estimated 1RM {result.best_e1rm} kg, {ago}\n")
+            print(f"{'date':<12}{'e1RM':>8}{'top set':>10}{'sets':>6}{'volume':>10}")
+            print("-" * 46)
+            for day, e1rm, top, sets, volume in history:
+                shown = f"{e1rm:.1f}" if e1rm is not None else "-"
+                print(f"{str(day):<12}{shown:>8}{top:>9.1f}kg{sets:>6}{volume:>9.0f}kg")
+            return 0
+
+        rows = exercise_summary(store)
+        if not rows:
+            print("No strength data yet. Run `health sync hevy`.")
+            return 0
+        stale = {row["exercise"] for row in stale_lifts(store)}
+        print(f"{'exercise':<34}{'muscle':<13}{'last':<12}{'n':>3}{'best e1RM':>11}  trend")
+        print("-" * 88)
+        for row in rows:
+            trend = progression(store, row["exercise"])
+            flag = "  (stale)" if row["exercise"] in stale else ""
+            best = f"{row['best_e1rm']:.1f} kg" if row["best_e1rm"] else "-"
+            print(f"{row['exercise'][:33]:<34}{(row['muscle'] or '-')[:12]:<13}"
+                  f"{str(row['last_done']):<12}{row['sessions']:>3}{best:>11}  "
+                  f"{trend.describe()}{flag}")
+    return 0
+
+
+def cmd_volume(args, config) -> int:
+    with _store(config, read_only=True) as store:
+        rows = weekly_volume(store, weeks=args.weeks)
+    if not rows:
+        print("No strength data yet. Run `health sync hevy`.")
+        return 0
+
+    weeks = sorted({row[0] for row in rows}, reverse=True)
+    muscles = sorted({row[1] for row in rows})
+    table = {(row[0], row[1]): row[2] for row in rows}
+
+    header = f"{'week':<12}" + "".join(f"{m[:10]:>11}" for m in muscles) + f"{'total':>11}"
+    print(header)
+    print("-" * len(header))
+    for week in weeks:
+        cells = "".join(
+            f"{table.get((week, m), 0):>10.0f}kg" if table.get((week, m)) else f"{'-':>11}"
+            for m in muscles
+        )
+        total = sum(table.get((week, m), 0) for m in muscles)
+        print(f"{str(week.date() if hasattr(week, 'date') else week):<12}{cells}{total:>10.0f}kg")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="health", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -174,6 +241,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("status", help="what's in the database").set_defaults(fn=cmd_status)
     sub.add_parser("doctor", help="check credentials and connectivity").set_defaults(fn=cmd_doctor)
+
+    lifts = sub.add_parser("lifts", help="strength progression")
+    lifts.add_argument("exercise", nargs="?", help="exact Hevy exercise name")
+    lifts.add_argument("--window", type=int, default=8,
+                       help="sessions to fit the trend over (default 8)")
+    lifts.add_argument("--limit", type=int, default=20, help="sessions to list")
+    lifts.set_defaults(fn=cmd_lifts)
+
+    volume = sub.add_parser("volume", help="weekly tonnage by muscle group")
+    volume.add_argument("--weeks", type=int, default=8)
+    volume.set_defaults(fn=cmd_volume)
 
     sql = sub.add_parser("sql", help="run a query")
     sql.add_argument("query")

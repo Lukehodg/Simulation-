@@ -60,7 +60,7 @@ def test_deleted_workouts_are_removed_with_their_sets(store):
     assert store.query("SELECT COUNT(*) FROM strength_sets") == [(0,)]
 
 
-def test_e1rm_view_excludes_warmups(store):
+def test_working_sets_view_excludes_warmups(store):
     start = datetime(2026, 9, 1, 17, tzinfo=timezone.utc)
     store.load(Records(strength_sets=[
         StrengthSet(source="hevy", workout_id="w", exercise_idx=0, set_idx=0, ts=start,
@@ -70,7 +70,7 @@ def test_e1rm_view_excludes_warmups(store):
                     local_date=date(2026, 9, 1), exercise="RDL", set_type="normal",
                     weight_kg=90, reps=5),
     ]))
-    rows = store.query("SELECT exercise, round(e1rm, 1) FROM strength_e1rm")
+    rows = store.query("SELECT exercise, round(e1rm, 1) FROM working_sets")
     assert rows == [("RDL", 105.0)]  # 90 * (1 + 5/30)
 
 

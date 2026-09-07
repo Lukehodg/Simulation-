@@ -75,6 +75,21 @@ CREATE TABLE IF NOT EXISTS strength_sets (
     PRIMARY KEY (source, workout_id, exercise_idx, set_idx)
 );
 
+-- Hevy's exercise catalogue, including your custom exercises. Muscle groups
+-- come from here so that volume-by-muscle is Hevy's own classification and not
+-- a list we would have to keep in step by hand.
+CREATE TABLE IF NOT EXISTS exercise_templates (
+    source        VARCHAR NOT NULL,
+    template_id   VARCHAR NOT NULL,
+    title         VARCHAR,
+    primary_muscle    VARCHAR,
+    secondary_muscles VARCHAR,
+    equipment     VARCHAR,
+    is_custom     BOOLEAN,
+    ingested_at   TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (source, template_id)
+);
+
 CREATE TABLE IF NOT EXISTS nutrition_days (
     source      VARCHAR NOT NULL,
     local_date  DATE    NOT NULL,

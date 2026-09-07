@@ -20,7 +20,7 @@ from typing import Any, Iterator
 import httpx
 
 from .. import raw as rawstore
-from ..models import Records, StrengthSet, Workout
+from ..models import ExerciseTemplate, Records, StrengthSet, Workout
 from ..secrets import get_secret
 from ..timeutil import isoformat, local_date, parse_ts
 from .base import Source
@@ -28,6 +28,7 @@ from .base import Source
 API_BASE = "https://api.hevyapp.com/v1"
 PAGE_SIZE = 10          # the workouts endpoint caps pageSize at 10
 EVENT_PAGE_SIZE = 10
+TEMPLATE_PAGE_SIZE = 100
 RATE_LIMIT_PAUSE = 0.3
 MAX_PAGES = 2000        # a guard against an endless pager, not a real limit
 
@@ -87,6 +88,22 @@ class HevySource(Source):
             if not (payload.get("workouts") or payload.get("events")):
                 continue
             written.append(rawstore.write(self.config.raw_dir, self.name, kind, payload))
+
+        # The catalogue is small and changes whenever you add a custom
+        # exercise, so it is cheap to refresh every sync and annoying to have
+        # stale: an unmapped exercise drops out of volume-by-muscle.
+        written.extend(self._fetch_templates())
+        return written
+
+    def _fetch_templates(self) -> list[Path]:
+        written: list[Path] = []
+        for payload in self.iter_pages("/exercise_templates",
+                                       {"pageSize": TEMPLATE_PAGE_SIZE}):
+            items = payload.get("exercise_templates") or payload.get("templates")
+            if not items:
+                continue
+            written.append(rawstore.write(self.config.raw_dir, self.name,
+                                          "exercise_templates", payload))
         return written
 
     def check(self) -> tuple[bool, str]:
@@ -105,6 +122,9 @@ class HevySource(Source):
         records = Records()
         for workout in payload.get("workouts", []) or []:
             self._parse_workout(workout, records)
+        for template in (payload.get("exercise_templates")
+                         or payload.get("templates") or []):
+            self._parse_template(template, records)
         for event in payload.get("events", []) or []:
             kind = (event.get("type") or "").lower()
             if kind == "deleted":
@@ -114,6 +134,27 @@ class HevySource(Source):
             elif event.get("workout"):
                 self._parse_workout(event["workout"], records)
         return records
+
+    @staticmethod
+    def _muscles(value: object) -> str | None:
+        """Hevy sends secondary muscles as a list; store them comma-joined so a
+        LIKE query still works without a second table."""
+        if isinstance(value, list):
+            return ", ".join(str(v) for v in value) or None
+        return str(value) if value else None
+
+    def _parse_template(self, template: dict, records: Records) -> None:
+        template_id = template.get("id") or template.get("exercise_template_id")
+        if not template_id:
+            return
+        records.exercise_templates.append(ExerciseTemplate(
+            source=self.name, template_id=str(template_id),
+            title=template.get("title") or template.get("name"),
+            primary_muscle=template.get("primary_muscle_group"),
+            secondary_muscles=self._muscles(template.get("secondary_muscle_groups")),
+            equipment=template.get("equipment"),
+            is_custom=template.get("is_custom"),
+        ))
 
     def _parse_workout(self, workout: dict, records: Records) -> None:
         wid = workout.get("id")
