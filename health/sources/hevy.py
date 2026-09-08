@@ -191,8 +191,12 @@ class HevySource(Source):
         else:
             pages = self.iter_pages("/workouts", {"pageSize": PAGE_SIZE})
             kind = "workouts"
+        seen = 0
         for payload in pages:
-            if not (payload.get("workouts") or payload.get("events")):
+            items = payload.get("workouts") or payload.get("events") or []
+            seen += len(items)
+            self.report_progress(kind, seen)
+            if not items:
                 continue
             written.append(rawstore.write(self.config.raw_dir, self.name, kind, payload))
 

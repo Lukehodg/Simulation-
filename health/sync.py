@@ -12,6 +12,7 @@ from __future__ import annotations
 import fcntl
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from typing import Callable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -86,9 +87,12 @@ def build_source(name: str, config: Config) -> Source:
 
 
 def sync_source(store: Store, config: Config, name: str,
-                since: datetime | None = None, full: bool = False) -> SyncReport:
+                since: datetime | None = None, full: bool = False,
+                progress: "Callable[[str, str, int], None] | None" = None) -> SyncReport:
     source = build_source(name, config)
     report = SyncReport(source=name)
+    if progress:
+        source.progress = lambda label, count: progress(name, label, count)
 
     if since is None and not full:
         cursor = store.get_cursor(name)
@@ -118,8 +122,10 @@ def sync_source(store: Store, config: Config, name: str,
 
 
 def sync_all(store: Store, config: Config, names: list[str] | None = None,
-             since: datetime | None = None, full: bool = False) -> list[SyncReport]:
-    reports = [sync_source(store, config, name, since=since, full=full)
+             since: datetime | None = None, full: bool = False,
+             progress: Callable[[str, str, int], None] | None = None) -> list[SyncReport]:
+    reports = [sync_source(store, config, name, since=since, full=full,
+                           progress=progress)
                for name in (names or list(SOURCES))]
     rebuild_derived(store)
     return reports

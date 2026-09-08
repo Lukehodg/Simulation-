@@ -202,8 +202,12 @@ class WhoopSource(Source):
         start = since or datetime.now(timezone.utc) - timedelta(days=30)
         written: list[Path] = []
         for collection in COLLECTIONS:
+            seen = 0
             for page in self.iter_pages(collection, start, until):
-                if not page.get("records"):
+                records = page.get("records") or []
+                seen += len(records)
+                self.report_progress(collection, seen)
+                if not records:
                     continue
                 written.append(rawstore.write(
                     self.config.raw_dir, self.name, collection, page

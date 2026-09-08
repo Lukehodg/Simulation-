@@ -79,9 +79,19 @@ def cmd_sync(args, config) -> int:
     names = args.sources or None
     from .sync import only_one
 
+    def show(source: str, label: str, count: int) -> None:
+        # One rewritten line rather than a scrolling wall; a backfill can page
+        # for minutes and silence is indistinguishable from a hang.
+        sys.stderr.write(f"\r  {source} · {label} · {count} records…\033[K")
+        sys.stderr.flush()
+
+    quiet = args.quiet or not sys.stderr.isatty()
     try:
         with only_one(config), _store(config) as store:
-            reports = sync_all(store, config, names, since=since, full=args.full)
+            reports = sync_all(store, config, names, since=since, full=args.full,
+                               progress=None if quiet else show)
+        if not quiet:
+            sys.stderr.write("\r\033[K")
     except RuntimeError as exc:
         raise SystemExit(str(exc))
     failed = False
@@ -575,6 +585,7 @@ def build_parser() -> argparse.ArgumentParser:
     sync.add_argument("sources", nargs="*", choices=[*SOURCES, []], help="default: all")
     sync.add_argument("--since", help="ISO date/time to fetch from")
     sync.add_argument("--full", action="store_true", help="ignore the stored cursor")
+    sync.add_argument("--quiet", action="store_true", help="no progress output")
     sync.set_defaults(fn=cmd_sync)
 
     ingest = sub.add_parser("ingest", help="load an export file or folder")

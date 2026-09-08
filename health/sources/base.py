@@ -3,6 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
+from typing import Callable
 
 from ..config import Config
 from ..models import Records
@@ -26,6 +27,13 @@ class Source(ABC):
 
     def __init__(self, config: Config) -> None:
         self.config = config
+        #: Set by the sync runner. A long backfill that prints nothing looks
+        #: hung, and a user who cannot tell the difference will interrupt it.
+        self.progress: Callable[[str, int], None] | None = None
+
+    def report_progress(self, label: str, count: int) -> None:
+        if self.progress:
+            self.progress(label, count)
 
     @abstractmethod
     def fetch(self, since: datetime | None = None,
