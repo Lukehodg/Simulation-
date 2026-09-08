@@ -287,6 +287,36 @@ whether a finding applies to you.
 > the sandbox this was built in blocks outbound requests to it. If the shape
 > has drifted, the failure will be loud and the fix small.
 
+## Keeping it running
+
+```sh
+health schedule --install              # 07:15 and 19:15 daily
+health schedule                        # is it loaded, and what did the last run say
+health backup --to ~/Dropbox/health    # archive raw/
+```
+
+Everything here assumes data keeps arriving, which it does not unless
+something runs `health sync`. `schedule --install` writes a launchd agent
+pointed at your own interpreter and project — launchd has almost no PATH, so a
+bare `health` would not resolve — and sends output to `data/logs/sync.log`, so
+a sync that has been quietly failing for a fortnight is visible rather than
+assumed. A scheduled time that passes while the lid is shut runs on wake
+instead of being skipped. On anything that is not macOS it prints the cron line
+instead.
+
+Two syncs cannot run at once: DuckDB gives the file to a single writer, so a
+scheduled run that collides with a manual one now stops with a sentence rather
+than a lock error that looks like a bug.
+
+**Backups archive `raw/`, not the database.** The database is disposable —
+`health replay` rebuilds every table from raw payloads. What cannot be rebuilt
+is the payloads: WHOOP will not serve two-year-old records forever, Garmin
+exports are manual and rate-limited, and a lab report deleted from your
+downloads is gone. Archives carry a manifest describing what is inside them,
+restores refuse to merge into a non-empty `raw/` unless forced, and every path
+in an archive is checked before extraction — a tar file is a list of paths
+someone else wrote, and `../` is a legal one.
+
 ## The interface
 
 ```sh

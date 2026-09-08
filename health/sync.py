@@ -9,6 +9,8 @@ idempotent upsert costs a few API calls and gets the corrections.
 
 from __future__ import annotations
 
+import fcntl
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -48,6 +50,33 @@ class SyncReport:
             return f"{self.source}: nothing new"
         detail = ", ".join(f"{count} {table}" for table, count in sorted(self.rows.items()))
         return f"{self.source}: {self.files} payload(s) → {detail}"
+
+
+@contextmanager
+def only_one(config: Config):
+    """Hold a lock for the duration of a sync.
+
+    Without it, the scheduled sync and a manual one can overlap: DuckDB gives
+    the file to one writer, so the loser fails with a lock error that looks
+    like a bug rather than a queue.
+    """
+    config.data_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = config.data_dir / "sync.lock"
+    handle = lock_path.open("w")
+    try:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise RuntimeError(
+                "another sync is already running — this one stopped rather "
+                "than fighting it for the database"
+            ) from None
+        yield
+    finally:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+        finally:
+            handle.close()
 
 
 def build_source(name: str, config: Config) -> Source:

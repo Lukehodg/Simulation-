@@ -16,6 +16,8 @@
     health sql "SELECT ..."     ask the database directly
     health mcp                  serve the tools Claude calls (stdio)
     health serve                open the interface in a browser
+    health schedule             run the sync automatically, twice a day
+    health backup               archive raw/ — the part that cannot be refetched
 """
 
 from __future__ import annotations
@@ -75,8 +77,13 @@ def cmd_sync(args, config) -> int:
     config.ensure_dirs()
     since = parse_ts(args.since) if args.since else None
     names = args.sources or None
-    with _store(config) as store:
-        reports = sync_all(store, config, names, since=since, full=args.full)
+    from .sync import only_one
+
+    try:
+        with only_one(config), _store(config) as store:
+            reports = sync_all(store, config, names, since=since, full=args.full)
+    except RuntimeError as exc:
+        raise SystemExit(str(exc))
     failed = False
     for report in reports:
         print(report.summary())
@@ -171,6 +178,73 @@ def cmd_doctor(args, config) -> int:
             for line in SETUP_HINTS.get(name, []):
                 print(f"     {line}")
     return 1 if problems else 0
+
+
+def cmd_schedule(args, config) -> int:
+    from . import schedule as scheduler
+
+    if args.remove:
+        print(scheduler.remove(config))
+        return 0
+
+    if args.install:
+        config.ensure_dirs()
+        try:
+            _, message = scheduler.install(config, args.times)
+        except ValueError as exc:
+            raise SystemExit(str(exc))
+        print(message)
+        return 0
+
+    state = scheduler.status(config)
+    if not state["installed"]:
+        print("Nothing scheduled. Sync only runs when you type it.\n"
+              "  health schedule --install            # 07:15 and 19:15 daily\n"
+              "  health schedule --install --times 08:00")
+        return 0
+    print(f"{'loaded' if state['loaded'] else 'installed but not loaded'}"
+          f" · {', '.join(state['times']) or 'no times'}")
+    print(f"agent  {state['plist']}")
+    print(f"log    {state['log']}")
+    if state["recent"]:
+        print("\nlast run\n" + "\n".join("  " + line
+                                          for line in state["recent"].splitlines()))
+    return 0
+
+
+def cmd_backup(args, config) -> int:
+    from . import backup as backups
+
+    if args.restore:
+        archive = Path(args.restore).expanduser()
+        if not archive.exists():
+            raise SystemExit(f"{archive} does not exist")
+        try:
+            result = backups.restore(archive, config, force=args.force)
+        except ValueError as exc:
+            raise SystemExit(str(exc))
+        print(f"restored {result['restored']} payload(s) from {result['from']}")
+        print("now run: health replay")
+        return 0
+
+    if args.verify:
+        archive = Path(args.verify).expanduser()
+        manifest = backups.read_manifest(archive)
+        print(f"{archive.name}\n  taken {manifest['created']}\n"
+              f"  {manifest['files']} payload(s), "
+              f"{manifest['bytes'] / 1_048_576:.1f} MB uncompressed")
+        for source, count in sorted(manifest.get("sources", {}).items()):
+            print(f"    {source:<16}{count}")
+        return 0
+
+    try:
+        result = backups.create(config, args.to)
+    except ValueError as exc:
+        raise SystemExit(str(exc))
+    print(f"{result.path}\n  {result.describe()}")
+    print("\nThe database is not in here — it rebuilds from these with "
+          "`health replay`.")
+    return 0
 
 
 def cmd_serve(args, config) -> int:
@@ -548,6 +622,20 @@ def build_parser() -> argparse.ArgumentParser:
     volume = sub.add_parser("volume", help="weekly tonnage by muscle group")
     volume.add_argument("--weeks", type=int, default=8)
     volume.set_defaults(fn=cmd_volume)
+
+    schedule_cmd = sub.add_parser("schedule", help="run the sync automatically")
+    schedule_cmd.add_argument("--install", action="store_true")
+    schedule_cmd.add_argument("--remove", action="store_true")
+    schedule_cmd.add_argument("--times", help="comma-separated, e.g. 07:15,19:15")
+    schedule_cmd.set_defaults(fn=cmd_schedule)
+
+    backup_cmd = sub.add_parser("backup", help="archive raw/")
+    backup_cmd.add_argument("--to", help="where to write the archive")
+    backup_cmd.add_argument("--verify", metavar="ARCHIVE", help="describe an archive")
+    backup_cmd.add_argument("--restore", metavar="ARCHIVE", help="unpack an archive")
+    backup_cmd.add_argument("--force", action="store_true",
+                            help="restore even though raw/ is not empty")
+    backup_cmd.set_defaults(fn=cmd_backup)
 
     serve_cmd = sub.add_parser("serve", help="open the interface in a browser")
     serve_cmd.add_argument("--port", type=int, default=8899)
