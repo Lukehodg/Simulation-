@@ -184,6 +184,51 @@ def today_payload(store: Store, config: Config, day: date | None = None) -> dict
     }
 
 
+def bloods_payload(store: Store, config: Config) -> dict[str, Any]:
+    """Everything the bloods page shows, including exactly what an analysis
+    would send — so the boundary can be inspected before it is crossed."""
+    from ..analysis import redacted_payload
+    from ..secrets import get_secret
+
+    panels = lab_features.panels(store)
+    if not panels:
+        return {"panels": [], "results": [], "empty": True,
+                "hint": SETUP_HINTS["labs"],
+                "has_key": bool(get_secret("ANTHROPIC_API_KEY", config.config_dir,
+                                           required=False))}
+
+    values = lab_features.latest_panel(store)
+    flagged = lab_features.flagged(store)
+    trends = {}
+    for value in values:
+        trend = lab_features.trend(store, value.analyte)
+        if len(trend.points) > 1:
+            trends[value.analyte] = {
+                "comparable": trend.comparable, "change": trend.change,
+                "summary": trend.describe(), "note": trend.note,
+                "points": [{"date": str(d), "value": v, "phase": p}
+                           for d, v, p in trend.points],
+            }
+
+    return {
+        "empty": False,
+        "panels": [{"date": str(d), "lab": lab, "count": n} for d, lab, n in panels],
+        "latest": {"date": str(panels[0][0]), "lab": panels[0][1],
+                   "count": panels[0][2], "flagged": len(flagged)},
+        "results": [{"analyte": v.analyte, "label": v.label, "value": v.value,
+                     "unit": v.unit, "flag": v.flag, "range": v.range_text,
+                     "range_source": v.ref_source, "phase": v.phase,
+                     "note": v.note, "converted": v.converted}
+                    for v in values],
+        "trends": trends,
+        "unconverted": [{"analyte": a, "unit": u} for a, u, _ in
+                        lab_features.unconverted(store)],
+        "would_send": redacted_payload(store),
+        "has_key": bool(get_secret("ANTHROPIC_API_KEY", config.config_dir,
+                                   required=False)),
+    }
+
+
 def metric_payload(store: Store, metric: str, days: int = 90,
                    as_of: date | None = None) -> dict[str, Any]:
     as_of = as_of or date.today()

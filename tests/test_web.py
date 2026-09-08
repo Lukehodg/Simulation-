@@ -8,6 +8,7 @@ import json
 import threading
 from datetime import date, datetime, time, timedelta, timezone
 from http.server import ThreadingHTTPServer
+from pathlib import Path
 from urllib.request import urlopen
 
 import pytest
@@ -178,3 +179,94 @@ def test_the_server_binds_loopback_only(db, config):
     from health.web import server as web_server
 
     assert web_server.HOST == "127.0.0.1"
+
+
+# -- the bloods page --------------------------------------------------------
+
+def _upload(base: str, path, name: str):
+    from urllib.request import Request, urlopen
+    request = Request(base + "/api/labs/upload", data=path.read_bytes(),
+                      headers={"X-Filename": name}, method="POST")
+    try:
+        return json.loads(urlopen(request).read())
+    except Exception as exc:  # HTTPError carries the JSON body
+        return json.loads(exc.read())
+
+
+def _serve(config):
+    handler = type("Bound", (Handler,), {"config": config})
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server, f"http://127.0.0.1:{server.server_address[1]}"
+
+
+def test_uploading_a_panel_stores_it_and_reports_what_it_could_not_read(db, config):
+    db.close()
+    server, base = _serve(config)
+    fixture = Path(__file__).parent / "fixtures" / "panel.json"
+    try:
+        result = _upload(base, fixture, "panel.json")
+        page = json.loads(urlopen(base + "/api/bloods").read())
+    finally:
+        server.shutdown(); server.server_close()
+
+    assert result["stored"] == 8
+    assert result["unrecognised"] == ["Klingon Particle Index"]
+    assert page["latest"]["flagged"] == 1
+    assert any(r["analyte"] == "ferritin" and r["flag"] == "low"
+               for r in page["results"])
+
+
+def test_an_upload_that_is_not_a_lab_report_is_refused(db, config):
+    db.close()
+    server, base = _serve(config)
+    junk = config.root / "cat.png"
+    junk.write_bytes(b"\x89PNG\r\n")
+    try:
+        result = _upload(base, junk, "cat.png")
+    finally:
+        server.shutdown(); server.server_close()
+
+    assert "not a lab report" in result["error"]
+
+
+def test_the_page_shows_exactly_what_an_analysis_would_send(db, config):
+    """The privacy boundary is inspectable before it is crossed."""
+    db.close()
+    server, base = _serve(config)
+    fixture = Path(__file__).parent / "fixtures" / "panel.json"
+    try:
+        _upload(base, fixture, "panel.json")
+        page = json.loads(urlopen(base + "/api/bloods").read())
+    finally:
+        server.shutdown(); server.server_close()
+
+    sent = page["would_send"]
+    assert sent["results"]
+    assert all({"analyte", "value", "unit", "flag"} <= set(r) for r in sent["results"])
+
+    # Nothing identifying survives into the data itself. (The payload's own
+    # note says the words "no name, date of birth..." — that is the disclaimer,
+    # not a leak, so the scan covers the results rather than the whole object.)
+    data = json.dumps({"panel_date": sent["panel_date"],
+                       "results": sent["results"]}).lower()
+    for leak in ("medichecks", "hodgkinson", "date_of_birth", "order", "raw_name",
+                 "raw_value", "birth", "address"):
+        assert leak not in data
+
+
+def test_the_redacted_payload_carries_the_context_that_changes_the_reading(db, config):
+    from health.analysis import redacted_payload
+    from health.sources.labs import LabsSource
+
+    source = LabsSource(config)
+    config.ensure_dirs()
+    landed = source.add(Path(__file__).parent / "fixtures" / "panel.json")
+    db.load(source.parse(landed))
+
+    payload = redacted_payload(db)
+    ferritin = next(r for r in payload["results"] if r["analyte"] == "ferritin")
+
+    assert ferritin["range_source"] == "lab"
+    assert "acute-phase reactant" in ferritin["known_caveat"]
+    assert "No name" in payload["note"]

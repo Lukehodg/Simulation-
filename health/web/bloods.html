@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>health · bloods</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chivo:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <h1>Bloods</h1>
+    <div class="meta"><span id="sub">reading the database</span>
+      <a href="/">today</a>
+      <button type="button" id="refresh">refresh</button></div>
+  </div>
+
+  <div class="drop" id="drop">
+    <p>Drop a lab report here</p>
+    <div class="sub">PDF from a UK panel provider, or a CSV / JSON panel</div>
+    <input type="file" id="file" accept=".pdf,.csv,.json">
+    <label for="file">choose a file</label>
+    <div class="sub" id="dropnote" style="margin-top:12px"></div>
+  </div>
+
+  <div id="body"></div>
+  <footer id="foot"></footer>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const el = (tag, cls, html) => {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (html !== undefined) node.innerHTML = html;
+  return node;
+};
+const sig = (v) => v === null || v === undefined ? "—" : String(Number(v.toPrecision(4)));
+const esc = (s) => String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+
+let state = null;
+
+/* ---------- results ----------
+   Out of range first and on their own, because that is what you opened the
+   page for. Everything in range is one click away, not 37 rows of scrolling
+   between you and the analysis. */
+function row(result, data) {
+  const line = el("div", "row");
+  const trend = data.trends[result.analyte];
+  let name = esc(result.label);
+  if (result.phase) name += ` <em>· drawn in ${result.phase}</em>`;
+  else if (trend) name += ` <em>· ${esc(trend.summary)}</em>`;
+  line.appendChild(el("div", "name", name));
+
+  const tag = (result.flag === "low" || result.flag === "high")
+    ? `<span class="tag ${result.flag}">${result.flag}</span>` : "";
+  const range = result.range_source === "generic"
+    ? `<span class="flat">${esc(result.range)}</span>` : esc(result.range);
+  line.appendChild(el("div", "fig",
+    `${sig(result.value)} ${esc(result.unit || "")} · ${range}${tag}`));
+  return line;
+}
+
+function flaggedResults(data) {
+  const box = el("section");
+  const head = el("div", "head");
+  head.appendChild(el("h3", null,
+    `Panel · ${data.latest.date}${data.latest.lab ? " · " + esc(data.latest.lab) : ""}`));
+  head.appendChild(el("div", "mono",
+    `${data.latest.flagged} of ${data.latest.count} outside range`));
+  box.appendChild(head);
+
+  const flagged = data.results.filter(r => r.flag === "low" || r.flag === "high");
+  if (!flagged.length) {
+    box.appendChild(el("p", "caption", "Everything on this panel is inside its range."));
+    return box;
+  }
+  flagged.forEach(result => {
+    box.appendChild(row(result, data));
+    if (result.note) box.appendChild(el("p", "caption", esc(result.note)));
+  });
+  return box;
+}
+
+function normalResults(data) {
+  const rest = data.results.filter(r => r.flag !== "low" && r.flag !== "high");
+  const box = el("section");
+  const open = el("details");
+  const summary = el("summary", "colhead",
+    `In range · ${rest.length} result${rest.length === 1 ? "" : "s"}`);
+  open.appendChild(summary);
+  rest.forEach(result => open.appendChild(row(result, data)));
+
+  const notes = [];
+  if (data.results.some(r => r.range_source === "generic"))
+    notes.push("ranges in grey are generic, not your lab\'s");
+  if (data.unconverted.length)
+    notes.push("unit not recognised, so no flag: " +
+      data.unconverted.map(u => `${u.analyte} (${u.unit})`).join(", "));
+  Object.values(data.trends).filter(t => !t.comparable)
+    .forEach(t => notes.push(t.note));
+  if (notes.length) open.appendChild(el("p", "caption", notes.map(esc).join("<br>")));
+
+  box.appendChild(open);
+  return box;
+}
+
+
+
+/* ---------- the analysis ---------- */
+function markup(text) {
+  // A deliberately small renderer: headings, paragraphs, bold, links, lists.
+  // The response is Claude's prose, not arbitrary HTML, and everything is
+  // escaped before any tag is added back.
+  const lines = esc(text).split("\n");
+  let html = "", list = false;
+  const inline = (s) => s
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\[(.+?)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+    .replace(/(^|\s)(https?:\/\/[^\s<]+)/g, '$1<a href="$2" target="_blank" rel="noopener">$2</a>');
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (/^[-*]\s+/.test(line)) {
+      if (!list) { html += "<ul>"; list = true; }
+      html += `<li>${inline(line.replace(/^[-*]\s+/, ""))}</li>`;
+      continue;
+    }
+    if (list) { html += "</ul>"; list = false; }
+    if (!line) continue;
+    if (/^#{2,3}\s+/.test(line)) html += `<h2>${inline(line.replace(/^#+\s+/, ""))}</h2>`;
+    else html += `<p>${inline(line)}</p>`;
+  }
+  if (list) html += "</ul>";
+  return html;
+}
+
+function analysePanel(data) {
+  const box = el("section", "analyse");
+  box.appendChild(el("div", "colhead", "Ask Claude to read it"));
+
+  const warn = el("div", "warn-box");
+  warn.appendChild(el("p", null,
+    "This is the only thing here that leaves your machine. It sends the "
+    + "<b>parsed values</b> — analyte, number, unit, reference range, flag — "
+    + "and nothing else."));
+  warn.appendChild(el("p", "mono",
+    "not sent: the report itself, your name, date of birth, order number, "
+    + "or the lab's address · <a href='#' id='showpayload'>see exactly what would be sent</a>"));
+  box.appendChild(warn);
+
+  if (!data.has_key) {
+    box.appendChild(el("p", "caption",
+      "No API key set, so nothing can be sent yet.<br>"
+      + "security add-generic-password -a health -s ANTHROPIC_API_KEY -w 'sk-ant-...'"));
+    return box;
+  }
+
+  const controls = el("div");
+  const input = el("input");
+  input.type = "text";
+  input.id = "question";
+  input.placeholder = "anything specific to ask? (optional)";
+  const go = el("button", "go", "Analyse this panel");
+  go.id = "go";
+  controls.appendChild(input);
+  controls.appendChild(go);
+  box.appendChild(controls);
+  box.appendChild(el("div", null, "<div id='report'></div>"));
+  return box;
+}
+
+function renderReport(result) {
+  const target = $("report");
+  target.innerHTML = "";
+  if (result.error) {
+    target.appendChild(el("p", "err", esc(result.error)));
+    return;
+  }
+  target.appendChild(el("div", "report", markup(result.text)));
+
+  if (result.papers && result.papers.length) {
+    const sources = el("div", "sources");
+    sources.appendChild(el("div", "colhead", "What it was given to read"));
+    result.papers.forEach(paper => {
+      const row = el("div", "src");
+      row.appendChild(el("div", null, paper.url
+        ? `<a href="${paper.url}" target="_blank" rel="noopener">${esc(paper.title)}</a>`
+        : esc(paper.title)));
+      row.appendChild(el("div", "kind",
+        `${esc(paper.design)}${paper.year ? " · " + paper.year : ""}`));
+      sources.appendChild(row);
+    });
+    target.appendChild(sources);
+  } else if (result.literature_error) {
+    target.appendChild(el("p", "caption",
+      "Literature search failed, so this was written without it: "
+      + esc(result.literature_error)));
+  }
+
+  const usage = result.usage && result.usage.input
+    ? ` · ${result.usage.input} in, ${result.usage.output} out` : "";
+  target.appendChild(el("p", "caption",
+    `${esc(result.model)}${usage} · an interpretation with citations, not a `
+    + "diagnosis. Anything outside range belongs in front of your doctor."));
+}
+
+/* ---------- render ---------- */
+function render(data) {
+  state = data;
+  const body = $("body");
+  body.innerHTML = "";
+
+  if (data.error) {
+    body.appendChild(el("p", "err", esc(data.error)));
+    return;
+  }
+
+  if (data.empty) {
+    $("sub").textContent = "no panels yet";
+    body.appendChild(el("p", "caption",
+      "Nothing stored yet. Drop a report above, or run: " + esc(data.hint)));
+    $("foot").textContent = "health serve · 127.0.0.1 only";
+    return;
+  }
+
+  $("sub").textContent = `${data.panels.length} panel${data.panels.length === 1 ? "" : "s"}`;
+  body.appendChild(flaggedResults(data));
+  body.appendChild(analysePanel(data));
+  body.appendChild(normalResults(data));
+  $("foot").textContent = "health serve · 127.0.0.1 only · nothing is sent anywhere until you press analyse";
+
+  const showPayload = $("showpayload");
+  if (showPayload) {
+    showPayload.addEventListener("click", event => {
+      event.preventDefault();
+      const existing = document.querySelector("pre.payload");
+      if (existing) { existing.remove(); return; }
+      const pre = el("pre", "payload", esc(JSON.stringify(data.would_send, null, 2)));
+      showPayload.closest(".warn-box").appendChild(pre);
+    });
+  }
+
+  const go = $("go");
+  if (go) {
+    go.addEventListener("click", async () => {
+      go.disabled = true;
+      const original = go.textContent;
+      go.textContent = "reading…";
+      $("report").innerHTML =
+        '<p class="thinking">Sending the values and searching the literature. '
+        + 'This takes <b>up to a minute</b> — it reads the papers before it answers.</p>';
+      try {
+        const response = await fetch("/api/labs/analyse", {
+          method: "POST",
+          body: JSON.stringify({ question: $("question").value.trim() }),
+        });
+        renderReport(await response.json());
+      } catch (error) {
+        renderReport({ error: String(error) });
+      } finally {
+        go.disabled = false;
+        go.textContent = original;
+      }
+    });
+  }
+}
+
+/* ---------- upload ---------- */
+async function upload(file) {
+  const note = $("dropnote");
+  note.innerHTML = `reading ${esc(file.name)}…`;
+  try {
+    const response = await fetch("/api/labs/upload", {
+      method: "POST",
+      headers: { "X-Filename": file.name },
+      body: file,
+    });
+    const result = await response.json();
+    if (result.error) {
+      note.innerHTML = `<span style="color:var(--bad)">${esc(result.error)}</span>`;
+      return;
+    }
+    let text = `stored ${result.stored} result${result.stored === 1 ? "" : "s"}`;
+    if (result.unrecognised && result.unrecognised.length) {
+      text += ` · not recognised: ${result.unrecognised.map(esc).join(", ")}`;
+    }
+    note.innerHTML = text;
+    load();
+  } catch (error) {
+    note.innerHTML = `<span style="color:var(--bad)">${esc(String(error))}</span>`;
+  }
+}
+
+const drop = $("drop");
+["dragenter", "dragover"].forEach(name =>
+  drop.addEventListener(name, event => {
+    event.preventDefault();
+    drop.classList.add("over");
+  }));
+["dragleave", "drop"].forEach(name =>
+  drop.addEventListener(name, event => {
+    event.preventDefault();
+    drop.classList.remove("over");
+  }));
+drop.addEventListener("drop", event => {
+  const file = event.dataTransfer.files[0];
+  if (file) upload(file);
+});
+$("file").addEventListener("change", event => {
+  const file = event.target.files[0];
+  if (file) upload(file);
+});
+
+async function load() {
+  try {
+    const response = await fetch("/api/bloods");
+    render(await response.json());
+  } catch (error) {
+    render({ error: String(error) });
+  }
+}
+
+$("refresh").addEventListener("click", load);
+load();
+</script>
+</body>
+</html>

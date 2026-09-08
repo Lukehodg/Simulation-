@@ -28,6 +28,7 @@ Built and tested:
 | **Daily features** | Robust baselines, deviations, training load, sleep regularity, autocorrelation-corrected correlations |
 | **Agent tools** | 19 MCP tools — the surface Claude actually talks to |
 | **Interface** | A local page on 127.0.0.1, served from the same database |
+| **Bloods page** | Drop a report in, see what is flagged, ask Claude to read it |
 
 Next: the Garmin export and `.FIT` parsers, energy availability (which needs
 Garmin's expenditure data), the morning brief as a scheduled job, and n-of-1
@@ -292,6 +293,42 @@ what to run rather than a dash.
 Standard library only, bound to loopback, opened per request: holding the
 database open would block `health sync` in another terminal, and when a sync
 does hold the file the page says it is busy rather than leaking a lock error.
+
+### Bloods
+
+`health serve` also serves `/bloods`. Drop a PDF report onto the page and it
+parses, converts, flags and stores it — the same path `health labs add` takes,
+so `raw/` still explains everything in the tables.
+
+What is out of range sits at the top on its own, with the caveat that belongs
+to it ("a raised GGT is a prompt to look, not a diagnosis"). Everything in
+range is one click away rather than thirty-seven rows of scrolling between you
+and the reason you opened the page.
+
+Then there is a button that asks Claude to read the panel — and **this is the
+only thing in the system that leaves your machine**. So the boundary is drawn
+narrowly and shown before you cross it:
+
+- Only parsed values go: analyte, number, unit, reference range, whose range it
+  was, the flag, previous values, and the cycle phase a draw was taken in where
+  that changes the reading.
+- The report never goes. Not the PDF, not the extracted text, not your name,
+  date of birth, order number or the lab's address — none of it is in the
+  payload, because the parser never stored it.
+- **See exactly what would be sent** prints the payload on the page before you
+  press anything, and a test asserts nothing identifying survives into it.
+- No key, no request. Nothing is sent until you press the button.
+
+What comes back is an interpretation with citations — what stands out, what
+could explain it, what the literature says, what to ask your doctor, and what
+it cannot tell you. It runs under a system prompt that forbids diagnosis and
+dosing, requires it to say where a reference range came from, and tells it to
+say plainly when evidence is thin. The papers it was given to read are listed
+underneath, with their study designs, so you can check its homework.
+
+```sh
+security add-generic-password -a health -s ANTHROPIC_API_KEY -w 'sk-ant-...'
+```
 
 ## The agent
 

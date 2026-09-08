@@ -14,6 +14,8 @@ dependencies = [
     "pypdf>=4.0",
     # The tool surface the agent talks to.
     "mcp>=2.0",
+    # Reading a blood panel with Claude — the one call that leaves the machine.
+    "anthropic>=1.0",
 ]
 
 [project.optional-dependencies]
@@ -31,6 +33,8 @@ packages = ["health"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "health/web/index.html" = "health/web/index.html"
+"health/web/bloods.html" = "health/web/bloods.html"
+"health/web/style.css" = "health/web/style.css"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
