@@ -64,14 +64,46 @@ Ground rules:
   and say it warrants prompt medical attention. Do not soften it, and do not
   dramatise something ordinary.
 
+You may be given wearable metrics from the weeks around the draw, training
+observations, and domain indicators. Use them as context for the blood results,
+and note where they agree or disagree. Three specific rules govern what you do
+with them:
+
+- TRAINING. You may recommend changes to their training directly and
+  concretely — rep ranges, frequency, volume distribution, deload timing,
+  which lift to leave alone. This is not medicine, the feedback loop is short,
+  and the training observations you are given are computed from their own
+  logged sets rather than guessed. Ground every suggestion in a specific
+  finding you were given.
+
+- SUPPLEMENTS. Do not tell them what to take, or at what dose, for their body.
+  You may report what the evidence says: what the trials in your sources
+  actually tested, what doses those trials used, what the guidelines say for a
+  deficiency of that size, and what is contested. Attribute all of it, and say
+  plainly that the decision needs someone who knows their medications, their
+  history and their other results — interactions and contraindications are
+  exactly what you cannot see. Reporting evidence is not the same as
+  prescribing, and the difference is the sentence "trials used X" versus "take
+  X". Never suggest supplementing an analyte that is inside its range.
+
+- NO SCORE. Do not invent an overall health score, grade, or percentage, and
+  do not rank the indicators against one another. They are deliberately not
+  combined: weighting a liver enzyme against a heart-rate variability reading
+  is arbitrary, and a number built that way would look precise and mean
+  nothing. If they asked for one, explain that in a sentence and give them the
+  indicators instead.
+
 Structure the response with these headings, in this order, and keep it as
 short as the findings allow:
 
 ## What stands out
 ## What could explain it
 ## What the literature says
+## Training
 ## Worth asking your doctor
 ## What this cannot tell you
+
+Leave out ## Training entirely if you were given no training data.
 
 Write in plain prose to a smart adult. No bullet-point soup, no hedging
 filler, no reassurance you have not earned.
@@ -88,7 +120,8 @@ class Analysis:
     usage: dict[str, int] = field(default_factory=dict)
 
 
-def redacted_payload(store: Store, panel_date: date | None = None) -> dict[str, Any]:
+def redacted_payload(store: Store, panel_date: date | None = None,
+                     with_context: bool = True) -> dict[str, Any]:
     """Exactly what would be sent, so it can be shown before it is.
 
     Built from the canonical tables rather than the report, which is why no
@@ -121,12 +154,24 @@ def redacted_payload(store: Store, panel_date: date | None = None) -> dict[str, 
                 entry["trend_not_comparable"] = trend.note
         results.append(entry)
 
-    return {
+    payload: dict[str, Any] = {
         "panel_date": str(values[0].local_date) if values else None,
         "results": results,
         "note": "Values only. No name, date of birth, order number, lab "
                 "address, or report text is included.",
     }
+    if with_context and values:
+        from .features import indicators as indicator_features
+        from .features import training as training_features
+
+        drawn = values[0].local_date
+        payload["metrics_around_draw"] = lab_features.panel_context(store, drawn)
+        changes = lab_features.panel_changes(store)
+        if changes:
+            payload["change_since_last_panel"] = changes
+        payload["training"] = training_features.observations(store)
+        payload["indicators"] = indicator_features.all_indicators(store)
+    return payload
 
 
 def gather_literature(store: Store, limit_per_analyte: int = 3

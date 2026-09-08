@@ -270,3 +270,43 @@ def test_the_redacted_payload_carries_the_context_that_changes_the_reading(db, c
     assert ferritin["range_source"] == "lab"
     assert "acute-phase reactant" in ferritin["known_caveat"]
     assert "No name" in payload["note"]
+
+
+def test_the_draw_phase_is_shown_only_where_it_changes_the_reading(db, config):
+    """Oestradiol moves several-fold across a cycle; GGT does not, and a phase
+    label on that row is noise."""
+    from datetime import date as _date
+    from health.features import cycle as cycle_features
+    from health.models import CycleEvent, LabResult, Records
+
+    day = _date(2026, 8, 14)
+    records = Records(cycle_events=[
+        CycleEvent(source="apple_health", local_date=_date(2026, 8, 1),
+                   event="period_start", flow="medium"),
+        CycleEvent(source="apple_health", local_date=_date(2026, 8, 29),
+                   event="period_start", flow="medium"),
+    ], lab_results=[
+        LabResult(source="labs", panel_id="p", analyte="ggt", local_date=day,
+                  value=114.2, unit="U/L", ref_high=71, ref_source="lab",
+                  flag="high", converted=True),
+        LabResult(source="labs", panel_id="p", analyte="oestradiol", local_date=day,
+                  value=210.0, unit="pmol/L", ref_source="none", flag="unknown",
+                  converted=True),
+    ])
+    for offset in range(4):
+        records.cycle_events.append(CycleEvent(
+            source="apple_health", local_date=_date(2026, 8, 1 + offset),
+            event="flow", flow="light"))
+    db.load(records)
+    cycle_features.rebuild(db, through=day)
+    db.close()
+
+    server, base = _serve(config)
+    try:
+        page = json.loads(urlopen(base + "/api/bloods").read())
+    finally:
+        server.shutdown(); server.server_close()
+
+    rows = {r["analyte"]: r for r in page["results"]}
+    assert rows["oestradiol"]["phase"]        # varies with the cycle
+    assert rows["ggt"]["phase"] is None       # does not

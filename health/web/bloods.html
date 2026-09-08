@@ -110,6 +110,75 @@ function normalResults(data) {
 
 
 
+/* ---------- indicators, training, context ----------
+   Several indicators rather than one score: weighting a liver enzyme against
+   an HRV reading would be arbitrary, and the number would move for reasons
+   you could not trace. Each one carries the evidence behind it. */
+const STATUS_CLASS = { ok: "up", watch: "flat", attention: "down", unknown: "flat" };
+
+function indicatorList(data) {
+  const box = el("section");
+  const head = el("div", "head");
+  head.appendChild(el("h3", null, "Indicators"));
+  const complete = data.indicators.completeness;
+  head.appendChild(el("div", "mono",
+    `${complete.percent}% of sources present`));
+  box.appendChild(head);
+
+  data.indicators.indicators.forEach(indicator => {
+    const line = el("div", "row");
+    line.appendChild(el("div", "name",
+      `${esc(indicator.name)} <em>· ${esc(indicator.detail)}</em>`));
+    line.appendChild(el("div", "fig",
+      `<span class="${STATUS_CLASS[indicator.status] || "flat"}">${esc(indicator.status)}</span>`
+      + ` · <span class="flat">${esc(indicator.evidence)} evidence</span>`));
+    box.appendChild(line);
+  });
+
+  box.appendChild(el("p", "caption", esc(data.indicators.no_total)
+    + (complete.missing.length
+        ? `<br>missing entirely: ${complete.missing.map(esc).join(", ")}` : "")));
+  return box;
+}
+
+function trainingList(data) {
+  if (!data.training || !data.training.length) return el("div");
+  const box = el("section");
+  box.appendChild(el("div", "colhead", "Training · computed from your logged sets"));
+  data.training.forEach(item => {
+    const line = el("div", "row");
+    line.appendChild(el("div", "name",
+      `${esc(item.subject)} <em>· ${esc(item.detail)}</em>`));
+    line.appendChild(el("div", "fig", esc(item.kind)));
+    box.appendChild(line);
+    if (item.suggestion) box.appendChild(el("p", "caption", esc(item.suggestion)));
+  });
+  return box;
+}
+
+function drawContext(data) {
+  const window = (data.context && data.context["28d_before"]) || {};
+  const entries = Object.entries(window);
+  if (!entries.length) return el("div");
+
+  const box = el("section");
+  const open = el("details");
+  open.appendChild(el("summary", "colhead",
+    "What your metrics were doing in the 28 days before this draw"));
+  entries.forEach(([metric, stat]) => {
+    const line = el("div", "row");
+    line.appendChild(el("div", "name", esc(metric.replace(/_/g, " "))));
+    line.appendChild(el("div", "fig",
+      `${sig(stat.median)} <span class="flat">· median of ${stat.days}d</span>`));
+    open.appendChild(line);
+  });
+  open.appendChild(el("p", "caption",
+    "Context for the panel, not a correlation — one draw is a point, not a "
+    + "direction. A second panel makes this a comparison."));
+  box.appendChild(open);
+  return box;
+}
+
 /* ---------- the analysis ---------- */
 function markup(text) {
   // A deliberately small renderer: headings, paragraphs, bold, links, lists.
@@ -229,6 +298,9 @@ function render(data) {
   $("sub").textContent = `${data.panels.length} panel${data.panels.length === 1 ? "" : "s"}`;
   body.appendChild(flaggedResults(data));
   body.appendChild(analysePanel(data));
+  body.appendChild(indicatorList(data));
+  body.appendChild(trainingList(data));
+  body.appendChild(drawContext(data));
   body.appendChild(normalResults(data));
   $("foot").textContent = "health serve · 127.0.0.1 only · nothing is sent anywhere until you press analyse";
 

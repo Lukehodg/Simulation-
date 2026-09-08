@@ -17,7 +17,7 @@ generic one travels with the flag, everywhere.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 
 from .. import analytes as A
 from ..store import Store
@@ -159,6 +159,82 @@ def by_phase(store: Store, analyte: str) -> dict[str, list[tuple[date, float]]]:
         grouped.setdefault(value.phase or "unplaced", []).append(
             (value.local_date, value.value))
     return grouped
+
+
+def panel_context(store: Store, panel_date: date, windows: tuple[int, ...] = (14, 28)
+                  ) -> dict:
+    """What your wearables were saying in the weeks before a draw.
+
+    A blood test is one morning; the metrics around it are the conditions that
+    morning arrived in. This does not correlate anything — with one panel there
+    is nothing to correlate — it supplies the context a single value is read in,
+    and becomes a comparison the moment a second panel exists.
+    """
+    from .. import metrics as M
+
+    wanted = [M.HRV_RMSSD, M.RESTING_HR, M.SLEEP_DURATION, M.RECOVERY_SCORE,
+              M.STEPS, M.ENERGY_INTAKE, M.PROTEIN, M.BODY_MASS, M.STRAIN]
+    out: dict[str, dict] = {}
+    for days in windows:
+        rows = store.query(
+            """
+            SELECT metric, median(value), COUNT(*)
+            FROM daily_metrics
+            WHERE metric IN ? AND local_date > ? AND local_date <= ?
+            GROUP BY metric
+            """,
+            [wanted, panel_date - timedelta(days=days), panel_date],
+        )
+        out[f"{days}d_before"] = {
+            metric: {"median": round(value, 2), "days": n} for metric, value, n in rows
+        }
+
+    load = store.query(
+        """
+        SELECT COUNT(DISTINCT local_date), COALESCE(SUM(volume_kg), 0)
+        FROM working_sets WHERE local_date > ? AND local_date <= ?
+        """,
+        [panel_date - timedelta(days=28), panel_date],
+    )
+    if load and load[0][0]:
+        out["28d_before"]["strength_sessions"] = {"median": load[0][0], "days": 28}
+        out["28d_before"]["strength_tonnage_kg"] = {"median": round(load[0][1]), "days": 28}
+    return out
+
+
+def panel_changes(store: Store) -> list[dict]:
+    """Analyte movement between the two most recent panels, with the metric
+    context around each — the shape a "what changed, and what was different"
+    question needs. Empty until there are two panels, which is honest: one
+    panel is a point, not a direction."""
+    all_panels = panels(store)
+    if len(all_panels) < 2:
+        return []
+
+    latest, previous = all_panels[0][0], all_panels[1][0]
+    rows = store.query(
+        """
+        SELECT a.analyte, b.value AS before, a.value AS after, a.unit, a.flag
+        FROM lab_results a
+        JOIN lab_results b ON b.analyte = a.analyte AND b.local_date = ?
+        WHERE a.local_date = ? AND a.value IS NOT NULL AND b.value IS NOT NULL
+        ORDER BY a.analyte
+        """,
+        [previous, latest],
+    )
+    out = []
+    for analyte, before, after, unit, flag in rows:
+        spec = A.ANALYTES.get(analyte)
+        change = round(after - before, 4)
+        entry = {"analyte": analyte, "label": spec.label if spec else analyte,
+                 "from": before, "to": after, "unit": unit, "change": change,
+                 "percent": round(100 * change / before, 1) if before else None,
+                 "flag_now": flag}
+        if spec and spec.cycle_sensitive:
+            entry["caution"] = ("moves with the cycle; only comparable if both "
+                                "draws were in the same phase")
+        out.append(entry)
+    return out
 
 
 def unconverted(store: Store) -> list[tuple[str, str, str]]:

@@ -29,6 +29,8 @@ Built and tested:
 | **Agent tools** | 19 MCP tools — the surface Claude actually talks to |
 | **Interface** | A local page on 127.0.0.1, served from the same database |
 | **Bloods page** | Drop a report in, see what is flagged, ask Claude to read it |
+| **Indicators** | Per-domain status with the evidence behind each — deliberately no single score |
+| **Training observations** | Stalled, dormant, progressing and imbalanced, computed from your sets |
 
 Next: the Garmin export and `.FIT` parsers, energy availability (which needs
 Garmin's expenditure data), the morning brief as a scheduled job, and n-of-1
@@ -329,6 +331,60 @@ underneath, with their study designs, so you can check its homework.
 ```sh
 security add-generic-password -a health -s ANTHROPIC_API_KEY -w 'sk-ant-...'
 ```
+
+## Indicators, and why there is no health score
+
+A single composite score needs weights across incommensurable things — how many
+milliseconds of HRV is one unit of GGT worth? There is no non-arbitrary answer,
+no outcome such a number has been validated against, and no way to trace why it
+moved. What it reliably produces is a figure people optimise instead of the
+thing it stands for.
+
+So the bloods page shows several indicators instead, each interpretable on its
+own and each carrying the strength of the evidence behind it:
+
+```
+Recovery       · HRV 71.7, +0.5 SD; resting HR 51.9, -0.6 SD    ok        · strong evidence
+Training load  · steady: last 7 days averaging 11 against 10    ok        · moderate evidence
+Liver          · GGT 114.2 U/L (high, range 10-71)              attention · strong evidence
+Lipids         · HDL cholesterol 1.06 mmol/L (low, range >1.55) attention · strong evidence
+```
+
+A laboratory's own reference interval is the strongest evidence in the system;
+a generic population range is weaker and is marked as such; the acute:chronic
+workload ratio is widely used and weakly evidenced, so it says moderate. The
+one figure that does aggregate is **completeness** — what fraction of the
+relevant data actually exists — which is a question with a real answer.
+
+The absence of a total is passed to the model explicitly, so it does not
+helpfully invent one.
+
+## Training observations
+
+Computed from your logged sets, not generated: which lifts have stopped moving
+(flat trend at a poor fit, over at least six sessions), which you have quietly
+stopped doing, where the weekly volume actually goes, and how fast load is
+ramping. Each carries the arithmetic it came from.
+
+Training changes are the one kind of recommendation this system makes freely —
+rep ranges are not medicine, the feedback loop is short, and the cost of being
+wrong is a mediocre eight weeks.
+
+**Supplements are handled differently.** The analysis will tell you what the
+trials in its sources actually tested, what doses they used, and what is
+contested — attributed, and only for an analyte that is genuinely out of range.
+It will not tell you what to take. Interactions and contraindications depend on
+your medications and history, which is exactly what it cannot see.
+
+## Bloods against your metrics
+
+Each panel is stored with what your wearables were doing in the 28 days before
+the draw, so a blood test is read in the conditions it arrived in rather than
+as a number in isolation. With one panel that is context, not correlation —
+one draw is a point, not a direction, and the page says so. A second panel
+turns it into a comparison, and `panel_changes` reports what moved in both the
+bloods and the metrics, with cycle-sensitive analytes flagged as comparable
+only within the same phase.
 
 ## The agent
 

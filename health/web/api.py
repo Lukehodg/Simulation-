@@ -12,6 +12,7 @@ from datetime import date, timedelta
 from typing import Any
 
 from .. import metrics as M
+from ..analytes import ANALYTES
 from ..config import Config
 from ..features import cycle as cycle_features
 from ..features import daily, labs as lab_features
@@ -188,6 +189,8 @@ def bloods_payload(store: Store, config: Config) -> dict[str, Any]:
     """Everything the bloods page shows, including exactly what an analysis
     would send — so the boundary can be inspected before it is crossed."""
     from ..analysis import redacted_payload
+    from ..features import indicators as indicator_features
+    from ..features import training as training_features
     from ..secrets import get_secret
 
     panels = lab_features.panels(store)
@@ -215,15 +218,24 @@ def bloods_payload(store: Store, config: Config) -> dict[str, Any]:
         "panels": [{"date": str(d), "lab": lab, "count": n} for d, lab, n in panels],
         "latest": {"date": str(panels[0][0]), "lab": panels[0][1],
                    "count": panels[0][2], "flagged": len(flagged)},
+        # The phase a draw was taken in is only worth showing for the analytes
+        # it actually moves; on a GGT row it is noise.
         "results": [{"analyte": v.analyte, "label": v.label, "value": v.value,
                      "unit": v.unit, "flag": v.flag, "range": v.range_text,
-                     "range_source": v.ref_source, "phase": v.phase,
-                     "note": v.note, "converted": v.converted}
+                     "range_source": v.ref_source, "note": v.note,
+                     "converted": v.converted,
+                     "phase": v.phase if (ANALYTES.get(v.analyte)
+                                          and ANALYTES[v.analyte].cycle_sensitive)
+                              else None}
                     for v in values],
         "trends": trends,
         "unconverted": [{"analyte": a, "unit": u} for a, u, _ in
                         lab_features.unconverted(store)],
         "would_send": redacted_payload(store),
+        "indicators": indicator_features.all_indicators(store),
+        "training": training_features.observations(store),
+        "context": lab_features.panel_context(store, panels[0][0]),
+        "changes": lab_features.panel_changes(store),
         "has_key": bool(get_secret("ANTHROPIC_API_KEY", config.config_dir,
                                    required=False)),
     }
