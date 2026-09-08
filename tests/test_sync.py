@@ -121,3 +121,34 @@ def test_a_failing_source_records_the_error_and_keeps_the_cursor(config, monkeyp
         # one, so `health status` shows the data going stale.
         assert store.query("SELECT last_ok FROM sync_state") == [(last_ok_before,)]
         assert "401 Unauthorized" in store.query("SELECT note FROM sync_state")[0][0]
+
+
+def test_a_first_sync_backfills_the_way_each_source_actually_backfills(config, monkeypatch):
+    """Hevy pages its whole workout collection; its events feed reports what
+    changed since a moment and is not a backfill. Handing it a default window
+    on a first sync sent it down the wrong path entirely."""
+    seen: dict = {}
+
+    class Recorder:
+        pollable = True
+
+        def __init__(self, cfg, windowed):
+            self.windowed_backfill = windowed
+
+        def fetch(self, since=None, until=None):
+            seen[self.windowed_backfill] = since
+            return []
+
+        def parse(self, path):
+            return Records()
+
+    monkeypatch.setattr("health.sync.build_source",
+                        lambda name, cfg: Recorder(cfg, name == "whoop"))
+
+    with Store(":memory:") as store:
+        store.init_schema()
+        sync_source(store, config, "whoop")     # windowed: wants a date range
+        sync_source(store, config, "hevy")      # paged: must not get one
+
+    assert seen[True] is not None
+    assert seen[False] is None

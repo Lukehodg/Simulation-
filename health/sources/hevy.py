@@ -54,6 +54,9 @@ def _number(value: object) -> float | None:
 
 class HevySource(Source):
     name = "hevy"
+    #: A first sync pages /workouts for the whole history; the events feed is
+    #: for what changed afterwards and does not stand in for a backfill.
+    windowed_backfill = False
 
     def __init__(self, config, client: httpx.Client | None = None,
                  pause: float = RATE_LIMIT_PAUSE) -> None:

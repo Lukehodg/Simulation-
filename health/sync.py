@@ -96,7 +96,7 @@ def sync_source(store: Store, config: Config, name: str,
             since = (parse_ts(cursor) or datetime.now(timezone.utc)) - OVERLAP.get(
                 name, timedelta(days=1)
             )
-        elif source.pollable:
+        elif source.pollable and source.windowed_backfill:
             since = datetime.now(timezone.utc) - timedelta(days=DEFAULT_BACKFILL_DAYS)
 
     started = datetime.now(timezone.utc)

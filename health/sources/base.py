@@ -18,6 +18,11 @@ class Source(ABC):
     name: str = "base"
     #: False for sources that arrive as files rather than over the wire.
     pollable: bool = True
+    #: True when a first sync should ask for a window of history. False for a
+    #: source whose backfill is "page the whole collection" — handing those a
+    #: `since` silently routes them down an incremental path that was never
+    #: meant to carry a backfill.
+    windowed_backfill: bool = True
 
     def __init__(self, config: Config) -> None:
         self.config = config
