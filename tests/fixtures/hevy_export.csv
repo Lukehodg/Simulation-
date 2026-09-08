@@ -1,0 +1,13 @@
+"title","start_time","end_time","description","exercise_title","superset_id","exercise_notes","set_index","set_type","weight_kg","reps","distance_km","duration_seconds","rpe"
+"Day 1 — Push","4 Sep 2026, 09:00","4 Sep 2026, 10:05","","Bench Press (Barbell)",,"",0,"warmup",20,10,,,
+"Day 1 — Push","4 Sep 2026, 09:00","4 Sep 2026, 10:05","","Bench Press (Barbell)",,"",1,"normal",60,8,,,7
+"Day 1 — Push","4 Sep 2026, 09:00","4 Sep 2026, 10:05","","Bench Press (Barbell)",,"",2,"normal",65,6,,,8.5
+"Day 1 — Push","4 Sep 2026, 09:00","4 Sep 2026, 10:05","","Chest Dip",,"",0,"normal",,8,,,
+"Day 1 — Push","4 Sep 2026, 09:00","4 Sep 2026, 10:05","","Row (Machine)",,"",0,"normal",90,10,,,
+"Day 1 — Push","4 Sep 2026, 09:00","4 Sep 2026, 10:05","","Row (Machine)",,"",1,"normal",95,8,,,
+"Day 1 — Push","4 Sep 2026, 09:00","4 Sep 2026, 10:05","","Row (Cable)",,"",0,"normal",25,12,,,
+"Day 1 — Push","4 Sep 2026, 09:00","4 Sep 2026, 10:05","","Row (Machine)",,"",0,"normal",30,12,,,
+"Day 1 — Push","4 Sep 2026, 09:00","4 Sep 2026, 10:05","","Row (Machine)",,"",1,"normal",30,12,,,
+"Day 2 — Legs","1 Sep 2026, 18:30","1 Sep 2026, 19:10","","Leg Press (Machine)",,"",0,"normal",180,10,,,
+"Day 2 — Legs","1 Sep 2026, 18:30","1 Sep 2026, 19:10","","Leg Press (Machine)",,"",1,"normal",200,8,,,
+"Day 2 — Legs","1 Sep 2026, 18:30","1 Sep 2026, 19:10","","Treadmill",,"",0,"normal",,,3.5,1200,

@@ -56,7 +56,9 @@ SELECT
     t.equipment
 FROM strength_sets s
 LEFT JOIN exercise_templates t
-       ON t.source = s.source AND t.template_id = s.exercise_id
+       ON t.source = s.source
+      AND (t.template_id = s.exercise_id
+           OR (s.exercise_id IS NULL AND lower(t.title) = lower(s.exercise)))
 WHERE s.weight_kg > 0
   AND s.reps > 0
   AND lower(COALESCE(s.set_type, 'normal')) NOT IN ('warmup', 'warm_up');

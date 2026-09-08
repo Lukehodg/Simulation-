@@ -25,6 +25,9 @@ from datetime import date, timedelta
 from ..store import Store
 
 MIN_SESSIONS_FOR_TREND = 4
+#: Two blocks of the same exercise in one session whose weights differ by more
+#: than this are almost certainly not the same movement on the same implement.
+VARIANT_GAP = 1.5
 DEFAULT_WINDOW_SESSIONS = 8
 STALE_AFTER_DAYS = 21
 
@@ -56,6 +59,45 @@ class Progression:
         direction = "up" if self.trend_kg_per_week > 0 else "down"
         return (f"{direction} {abs(self.trend_kg_per_week):.2f} kg/week "
                 f"over {self.sessions} sessions (r²={self.r_squared:.2f})")
+
+
+def variant_conflicts(store: Store) -> dict[str, dict]:
+    """Exercises logged at two clearly different loads within a single session.
+
+    A cable stack and a plate-loaded machine recorded under one name, or a
+    heavy movement and a light accessory sharing a label. It matters because
+    the session best takes the heavier block, so the series lurches whenever
+    that block is absent — which reads as a dramatic trend and is really a
+    naming problem. Better to say so than to report the lurch as progress.
+    """
+    rows = store.query(
+        """
+        SELECT exercise, local_date, exercise_idx,
+               MIN(weight_kg) AS low, MAX(weight_kg) AS high
+        FROM working_sets
+        WHERE weight_kg > 0
+        GROUP BY 1, 2, 3
+        ORDER BY 1, 2, 3
+        """
+    )
+    by_session: dict[tuple[str, object], list[tuple[float, float]]] = {}
+    for exercise, day, _, low, high in rows:
+        by_session.setdefault((exercise, day), []).append((low, high))
+
+    conflicts: dict[str, dict] = {}
+    for (exercise, day), blocks in by_session.items():
+        if len(blocks) < 2:
+            continue
+        blocks = sorted(blocks)
+        for (low_a, high_a), (low_b, high_b) in zip(blocks, blocks[1:]):
+            if low_b > high_a * VARIANT_GAP:
+                entry = conflicts.setdefault(
+                    exercise, {"sessions": 0, "example": None, "ranges": []})
+                entry["sessions"] += 1
+                entry["ranges"] = [f"{low_a:g}-{high_a:g} kg", f"{low_b:g}-{high_b:g} kg"]
+                entry["example"] = str(day)
+                break
+    return conflicts
 
 
 def session_history(store: Store, exercise: str, limit: int = 50) -> list[tuple]:
@@ -113,6 +155,16 @@ def progression(store: Store, exercise: str,
     if len(rows) < MIN_SESSIONS_FOR_TREND:
         result.note = (f"only {len(rows)} session(s); a trend needs at least "
                        f"{MIN_SESSIONS_FOR_TREND}")
+        return result
+
+    conflict = variant_conflicts(store).get(exercise)
+    if conflict:
+        result.note = (
+            f"logged at two very different loads in the same session "
+            f"({' and '.join(conflict['ranges'])}, e.g. {conflict['example']}), "
+            f"so the session best jumps depending on which blocks you did — "
+            f"no trend until these are logged as separate exercises"
+        )
         return result
 
     # Regress e1RM on days elapsed, so unevenly spaced sessions weigh correctly.

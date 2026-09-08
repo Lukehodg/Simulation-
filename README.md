@@ -66,6 +66,23 @@ when something is not working.
 
 ### Hevy — two minutes
 
+Already have an export? Skip the key entirely:
+
+```sh
+health ingest workout_data.csv --source hevy
+```
+
+The app's CSV export is one row per set. It lands verbatim, so a better parser
+later re-reads the original file. Two things in that format are easy to get
+wrong and are handled: timestamps are local wall time rather than UTC, and a
+workout that returns to an exercise later restarts its set numbering — keying
+the index on the exercise name files the second block over the first and loses
+it silently.
+
+The CSV carries no exercise template ids, so muscle groups stay empty until an
+API sync brings the catalogue in; the volume view then matches them by name.
+
+
 Hevy Pro only. Copy the key from `hevy.com/settings?developer`, then:
 
 ```sh

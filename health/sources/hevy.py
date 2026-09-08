@@ -12,6 +12,8 @@ API surface:
 
 from __future__ import annotations
 
+import csv
+import json
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,11 +28,28 @@ from ..timeutil import isoformat, local_date, parse_ts
 from .base import Source
 
 API_BASE = "https://api.hevyapp.com/v1"
+#: The app's CSV export writes local wall time like "7 Sep 2026, 11:50".
+CSV_TIME = "%d %b %Y, %H:%M"
 PAGE_SIZE = 10          # the workouts endpoint caps pageSize at 10
 EVENT_PAGE_SIZE = 10
 TEMPLATE_PAGE_SIZE = 100
 RATE_LIMIT_PAUSE = 0.3
 MAX_PAGES = 2000        # a guard against an endless pager, not a real limit
+
+
+def _number(value: object) -> float | None:
+    """CSV cells arrive empty for bodyweight sets and unrecorded RPE."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
 
 
 class HevySource(Source):
@@ -41,6 +60,91 @@ class HevySource(Source):
         super().__init__(config)
         self._client = client
         self._pause = pause
+
+    # -- the app's CSV export ---------------------------------------------
+
+    def add(self, path: Path, **_: object) -> Path:
+        """Land a workout_data.csv export.
+
+        The rows are landed verbatim rather than converted, so a better parser
+        later re-reads the original export instead of our first reading of it.
+        """
+        with path.open(newline="", encoding="utf-8-sig") as handle:
+            rows = [dict(row) for row in csv.DictReader(handle)]
+        if not rows:
+            raise ValueError(f"{path.name} has no rows")
+        expected = {"start_time", "exercise_title", "set_index"}
+        missing = expected - set(rows[0])
+        if missing:
+            raise ValueError(
+                f"{path.name} does not look like a Hevy export "
+                f"(missing {', '.join(sorted(missing))})")
+        return rawstore.write(self.config.raw_dir, self.name, "csv_export",
+                              {"format": "hevy_csv", "file": path.name, "rows": rows})
+
+    def _parse_csv(self, rows: list[dict], records: Records) -> None:
+        """One row per set, grouped into workouts by (title, start time).
+
+        The exercise index comes from the *order of blocks* rather than from
+        the exercise name: a workout can return to the same exercise later, and
+        its set numbering restarts from zero when it does. Keying on the name
+        would file the second block over the first and silently lose it.
+        """
+        current_key: tuple | None = None
+        exercise_idx = -1
+        last_exercise: str | None = None
+
+        for row in rows:
+            start = self._csv_time(row.get("start_time"))
+            title = (row.get("title") or "").strip()
+            if start is None:
+                continue
+
+            key = (title, start)
+            if key != current_key:
+                current_key = key
+                exercise_idx = -1
+                last_exercise = None
+                end = self._csv_time(row.get("end_time"))
+                workout_id = f"csv:{start.strftime('%Y%m%dT%H%M')}"
+                day = local_date(start, self.config.timezone)
+                records.workouts.append(Workout(
+                    source=self.name, source_id=workout_id, start_ts=start,
+                    end_ts=end, local_date=day, type="strength", title=title or None,
+                    duration_min=round((end - start).total_seconds() / 60, 1)
+                                 if end else None,
+                ))
+
+            exercise = (row.get("exercise_title") or "").strip()
+            if exercise != last_exercise:
+                exercise_idx += 1
+                last_exercise = exercise
+
+            workout_id = f"csv:{start.strftime('%Y%m%dT%H%M')}"
+            distance_km = _number(row.get("distance_km"))
+            records.strength_sets.append(StrengthSet(
+                source=self.name, workout_id=workout_id,
+                exercise_idx=exercise_idx,
+                set_idx=int(_number(row.get("set_index")) or 0),
+                ts=start, local_date=local_date(start, self.config.timezone),
+                exercise=exercise, exercise_id=None,
+                set_type=(row.get("set_type") or "normal").strip() or None,
+                weight_kg=_number(row.get("weight_kg")),
+                reps=int(_number(row.get("reps"))) if _number(row.get("reps")) else None,
+                distance_m=distance_km * 1000 if distance_km else None,
+                duration_s=_number(row.get("duration_seconds")),
+                rpe=_number(row.get("rpe")),
+            ))
+
+    def _csv_time(self, value: str | None) -> datetime | None:
+        """Export timestamps are local wall time, not UTC."""
+        if not value:
+            return None
+        try:
+            naive = datetime.strptime(value.strip(), CSV_TIME)
+        except ValueError:
+            return parse_ts(value)
+        return naive.replace(tzinfo=self.config.timezone).astimezone(timezone.utc)
 
     @property
     def client(self) -> httpx.Client:
@@ -120,6 +224,9 @@ class HevySource(Source):
         payload: Any = rawstore.RawFile(path, self.name, path.parent.parent.name,
                                         datetime.now(timezone.utc)).load()
         records = Records()
+        if payload.get("format") == "hevy_csv":
+            self._parse_csv(payload.get("rows", []), records)
+            return records
         for workout in payload.get("workouts", []) or []:
             self._parse_workout(workout, records)
         for template in (payload.get("exercise_templates")

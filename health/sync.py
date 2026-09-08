@@ -138,9 +138,15 @@ def ingest_path(store: Store, config: Config, path: Path,
 
     source = build_source(name, config)
     report = SyncReport(source=name)
-    files = sorted(path.glob("*.json")) if path.is_dir() else [path]
+    patterns = ("*.json", "*.csv") if path.is_dir() else ()
+    files = sorted(f for pattern in patterns for f in path.glob(pattern)) \
+            if path.is_dir() else [path]
     for item in files:
-        landed = rawstore.copy_in(config.raw_dir, name, "export", item)
+        # A source that knows how to read its own export shape gets to; the
+        # rest are landed as they arrived.
+        adder = getattr(source, "add", None)
+        landed = adder(item) if callable(adder) else \
+            rawstore.copy_in(config.raw_dir, name, "export", item)
         report.files += 1
         report.add(store.load(source.parse(landed)))
         store.record_raw(landed, name, "export", datetime.now(timezone.utc), parsed=True)
