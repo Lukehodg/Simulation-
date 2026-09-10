@@ -212,7 +212,8 @@ def cmd_schedule(args, config) -> int:
                 print(message)
             if args.brief is not None:
                 brief_time = args.brief or None
-                _, message = scheduler.install(config, brief_time, job="brief")
+                _, message = scheduler.install(config, brief_time, job="brief",
+                                               notify=args.notify)
                 print(message)
         except ValueError as exc:
             raise SystemExit(str(exc))
@@ -329,6 +330,9 @@ def cmd_brief(args, config) -> int:
                   "the machine.", file=sys.stderr)
             return 0
         get_secret("ANTHROPIC_API_KEY", config.config_dir)  # fail early, and clearly
+        if args.notify and not config.notify_imessage:
+            raise SystemExit("--notify needs HEALTH_NOTIFY_IMESSAGE set to your "
+                             "own number or Apple ID (in .env).")
         try:
             result = brief_mod.generate(store, config, span=span,
                                         question=args.ask)
@@ -348,6 +352,15 @@ def cmd_brief(args, config) -> int:
         path = directory / f"{date.today()}{'-week' if span == 'week' else ''}.md"
         path.write_text(f"# {span} brief · {date.today()}\n\n{result.text}\n")
         print(f"\nsaved to {path}", file=sys.stderr)
+    if args.notify and config.notify_imessage and result.usage:
+        from .notify import NotifyError, send_imessage
+
+        header = f"{span} brief · {date.today()}\n\n"
+        try:
+            send_imessage(config.notify_imessage, header + result.text)
+            print(f"texted to {config.notify_imessage}", file=sys.stderr)
+        except NotifyError as exc:
+            print(f"iMessage delivery failed: {exc}", file=sys.stderr)
     if result.usage:
         print(f"\n{result.model} · {result.usage['input']}+{result.usage['output']} "
               f"tokens · computed locally, only the labelled figures were sent",
@@ -675,6 +688,9 @@ def build_parser() -> argparse.ArgumentParser:
                            help="print exactly what would be sent, and stop")
     brief_cmd.add_argument("--save", action="store_true",
                            help="also write it to data/briefs/")
+    brief_cmd.add_argument("--notify", action="store_true",
+                           help="also text it to yourself over iMessage "
+                                "(needs HEALTH_NOTIFY_IMESSAGE)")
     brief_cmd.add_argument("--json", action="store_true",
                            help="machine-readable output")
     brief_cmd.set_defaults(fn=cmd_brief)
@@ -714,6 +730,9 @@ def build_parser() -> argparse.ArgumentParser:
                               metavar="TIME",
                               help="also write a daily brief (default 07:45); "
                                    "needs ANTHROPIC_API_KEY")
+    schedule_cmd.add_argument("--notify", action="store_true",
+                              help="with --brief: also text it to yourself "
+                                   "(needs HEALTH_NOTIFY_IMESSAGE)")
     schedule_cmd.add_argument("--no-brief", action="store_true",
                               help="stop the daily brief agent")
     schedule_cmd.set_defaults(fn=cmd_schedule)

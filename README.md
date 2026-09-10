@@ -447,6 +447,7 @@ health brief                     # the day, in two paragraphs
 health brief --week              # the week, plus its most interesting pattern
 health brief --ask "why has training felt hard this week?"
 health brief --no-send           # print exactly what would be sent, and stop
+health brief --notify            # also text it to yourself over iMessage
 ```
 
 Where the rest of the system hands you numbers, this hands you a reading of
@@ -458,6 +459,13 @@ never sees a raw series and never does arithmetic; `--no-send` shows you the
 exact payload first, the same contract as the bloods page. Needs
 `ANTHROPIC_API_KEY`. `health schedule --brief` runs it every morning and drops
 the result in `data/briefs/`.
+
+`--notify` also texts it to you. It sends over iMessage via `osascript` — a
+message to yourself — rather than a push service, so the brief's numbers travel
+the same iMessage/iCloud path that already carries your Health data, with no
+third-party account. Set `HEALTH_NOTIFY_IMESSAGE` to your own number or Apple
+ID; the first run triggers a one-time macOS Automation permission prompt.
+`health schedule --brief --notify` bakes it into the morning job.
 
 The signals it is built on are also callable directly, on the CLI and through
 the agent:

@@ -67,8 +67,11 @@ def executable() -> str:
     return str(candidate if candidate.exists() else "health")
 
 
-def plan(config: Config, times: str | None = None, job: str = "sync") -> Schedule:
+def plan(config: Config, times: str | None = None, job: str = "sync",
+         notify: bool = False) -> Schedule:
     label, program, log_name, default_times = JOBS[job]
+    if job == "brief" and notify:
+        program = (*program, "--notify")
     return Schedule(
         label=label,
         plist_path=Path("~/Library/LaunchAgents").expanduser() / f"{label}.plist",
@@ -131,15 +134,18 @@ def _load(schedule: Schedule, config: Config) -> str:
     return f"loaded · {' '.join(schedule.program)} at {', '.join(schedule.times)} daily"
 
 
-def install(config: Config, times: str | None = None,
-            job: str = "sync") -> tuple[Schedule, str]:
+def install(config: Config, times: str | None = None, job: str = "sync",
+            notify: bool = False) -> tuple[Schedule, str]:
     """Write and load an agent. Returns the schedule and what happened."""
-    schedule = plan(config, times, job=job)
+    schedule = plan(config, times, job=job, notify=notify)
     if job == "brief" and not get_secret("ANTHROPIC_API_KEY", config.config_dir,
                                          required=False):
         return schedule, ("ANTHROPIC_API_KEY is not set, and the brief needs it "
                           "to write anything — skipped. Add the key, then "
                           "`health schedule --brief`.")
+    if job == "brief" and notify and not config.notify_imessage:
+        return schedule, ("--notify needs HEALTH_NOTIFY_IMESSAGE set (your own "
+                          "number or Apple ID, in .env) — not installed.")
     return schedule, _load(schedule, config)
 
 

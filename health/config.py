@@ -32,6 +32,8 @@ class Config:
     root: Path
     timezone: ZoneInfo
     apple_export_dir: Path | None
+    #: iMessage handle (your own number or Apple ID) the brief texts itself to.
+    notify_imessage: str | None = None
 
     @property
     def data_dir(self) -> Path:
@@ -73,4 +75,5 @@ def load_config(root: Path | None = None) -> Config:
     raw_export_dir = os.environ.get("HEALTH_APPLE_EXPORT_DIR")
     export_dir = Path(raw_export_dir).expanduser() if raw_export_dir else None
 
-    return Config(root=root, timezone=tz, apple_export_dir=export_dir)
+    return Config(root=root, timezone=tz, apple_export_dir=export_dir,
+                  notify_imessage=os.environ.get("HEALTH_NOTIFY_IMESSAGE") or None)
