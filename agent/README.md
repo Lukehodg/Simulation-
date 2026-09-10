@@ -63,6 +63,7 @@ deleting nothing.
 | `lineage` | Print the family tree with scores and outcomes. |
 | `status [--json]` | Head, living generations, best score, and any divergence between the ledger and the disk. |
 | `selfcheck [--json]` | Evaluate the genome of the copy you are running. This is what a child runs to prove itself. |
+| `do "..."` | Give one instruction with checks: complete it or self-delete. |
 | `new [--template]` | Write a question file — by interview, or as an example to edit. |
 | `check FILE` | Validate a question file and print the prompt it produces. |
 | `cycle --home DIR` | Internal: the entry point a generation is launched through. |
@@ -123,9 +124,78 @@ beam width bites, half perfect mazes where the step budget bites. The seed
 genome solves 10 of 16; a tuned one solves all 16. So tuning is worth something
 measurable, which is what keeps the upgrade loop from being decoration.
 
+## Giving it one instruction: `do`
+
+The shortest way to use it. You type a command and how a finished job can be
+recognised; the agent attempts it and either satisfies every check or deletes
+itself.
+
+```console
+$ python3 -m selfmod do "Write a haiku about the M1 motorway" \
+      --must-contain motorway --max-words 20
+task: "Write a haiku about the M1 motorway"
+
+done means:
+  - must not be empty
+  - must contain 'motorway'
+  - must be at most 20 words
+
+survives if: every check must pass; otherwise it deletes itself
+```
+
+If the first attempt misses, that generation removes itself and the lineage is
+extinct — that is the rule, taken literally:
+
+```console
+attempt 1: gen-0001: terminated  [FAIL score 0.498] 1/2 checks — failed: must contain 'zebra'
+  deleted 16 files at .../workspace/generations/gen-0001
+
+x gen-0001  score +0.498  terminated  1/2 checks — failed: must contain 'zebra'
+
+The lineage is extinct: every generation that failed the task deleted itself.
+To let it work toward the task over several attempts instead of dying on the
+first miss, add --survive-at 0.5
+```
+
+`--survive-at 0.5` is the difference between "do it or die" and "get half of it
+right, survive, and evolve toward the rest". With it, a surviving generation
+keeps rewriting its own prompt — from the tactics pool in
+`selfmod/mission.py`, things like *do exactly what is asked and nothing more*
+or *check your reply against every requirement* — and keeps whichever wording
+satisfies more checks. Exit status is 0 if something survived, 1 if the
+lineage died out.
+
+### Saying what "done" means
+
+| Flag | Check |
+|---|---|
+| `--must-contain TEXT` | the reply contains it (case-insensitive) |
+| `--must-not-contain TEXT` | it does not |
+| `--max-words N` / `--min-words N` | length |
+| `--matches REGEX` | a pattern matches |
+| `--json-output` | the reply parses as JSON |
+| `--check-command 'CMD'` | your own shell command exits 0; `{output}` is replaced by a file holding the reply |
+| `--judge` | a separate grader call must score it 6/10 or better |
+
+The first six are deterministic and cannot be talked around. `--check-command`
+is the one that reaches outside the text — `--check-command 'python3 -m json.tool {output} > /dev/null'`,
+or a test suite, or a linter. It is your command and it runs on **every**
+cycle, unattended.
+
+`--judge` is the weak one, and it is off by default. It is a separate call
+whose prompt this lineage cannot evolve, and which is told to treat the work
+as untrusted text rather than instructions — but a lineage scored by a model
+will still drift toward pleasing that model rather than doing the job. Use it
+when nothing else can express what you want, alongside checks rather than
+instead of them.
+
+`--show` prints the mission and stops, so you can see what you have asked for
+before spending anything. A `do` cycle costs 2 calls (4 with `--judge`).
+
 ## The second task: evolving a prompt against Claude
 
-`--task llm` points the same lifecycle at the Claude API. The agent answers a
+Where `do` gives it one command, `--task llm` gives it a whole graded set —
+the same lifecycle, pointed at the Claude API. The agent answers a
 fixed set of eight questions with exact answers, and **what evolves is the
 wording of its own system prompt**: the genome carries a list of indices into
 a clause pool (`selfmod/llm_task.py`), and a child is a copy of the agent
@@ -339,13 +409,15 @@ grader out of the model's reach, as `llm` does.
 $ cd agent && python3 -m unittest discover -s tests -t .
 ```
 
-83 tests, standard library only, and **no test calls the API** — the suite
+104 tests, standard library only, and **no test calls the API** — the suite
 forces the simulated backend in `tests/__init__.py`. They cover the
 containment rules (escape via `..`, via symlink, via a forged marker outside
 the workspace, and deletion of the root itself are each refused), the genome
 rewrite including the prompt gene, mutation bounds and seed stability, task
 determinism, the reply cache and call budget, abstention deleting nothing,
-every rejection the question-file parser can raise, and
+every rejection the question-file parser can raise, every mission check
+including the shell one, a mission nobody can satisfy leaving nothing behind,
+and
 the full lifecycle end to end with real subprocesses and real deletions —
 upgrade, rejection, self-destruction, rollback to parent, extinction, and a
 head too broken to run.
@@ -363,6 +435,7 @@ agent/
     tasks.py         the pathfinding suite, plus tasks that always fail or pass
     llm_task.py      the Claude task whose system prompt is part of the genome
     promptpack.py    reads the plain-text question file `new` and `check` write
+    mission.py       `do` mode: one instruction, deterministic checks, a judge
     llm.py           the API backend, reply cache, call budget and offline stand-in
     errors.py        TaskUnavailable: could not be judged, so nothing is deleted
     orchestrator.py  seeding, running the head, evolving, status

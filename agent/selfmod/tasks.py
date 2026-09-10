@@ -263,9 +263,15 @@ def _load_llm() -> None:
     llm_task.register(REGISTRY)
 
 
+def _load_mission() -> None:
+    from . import mission
+
+    mission.register(REGISTRY)
+
+
 #: Tasks registered on first use, so importing this module never drags in a
 #: network client or an optional dependency.
-LAZY = {"llm": _load_llm}
+LAZY = {"llm": _load_llm, "mission": _load_mission}
 
 
 def names() -> list[str]:

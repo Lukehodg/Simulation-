@@ -16,7 +16,8 @@ from pathlib import Path
 import os
 
 from . import agent as agent_mod
-from . import genome, lineage, llm, orchestrator, promptpack, tasks
+from . import genome, lineage, llm, mission as mission_mod
+from . import orchestrator, promptpack, tasks
 
 DEFAULT_WORKSPACE = "workspace"
 
@@ -67,6 +68,34 @@ def build_parser() -> argparse.ArgumentParser:
                         help="delete an existing lineage and start over")
     _add_questions(p_init)
 
+    p_do = sub.add_parser(
+        "do", help="give the agent one instruction: it completes it or "
+                   "deletes itself")
+    p_do.add_argument("instruction", help="what the agent must do")
+    p_do.add_argument("--must-contain", action="append", metavar="TEXT")
+    p_do.add_argument("--must-not-contain", action="append", metavar="TEXT")
+    p_do.add_argument("--max-words", type=int, metavar="N")
+    p_do.add_argument("--min-words", type=int, metavar="N")
+    p_do.add_argument("--matches", action="append", metavar="REGEX")
+    p_do.add_argument("--json-output", action="store_true",
+                      help="the reply must be valid JSON")
+    p_do.add_argument("--check-command", action="append", metavar="CMD",
+                      help="a shell command that must exit 0; {output} is "
+                           "replaced by a file holding the reply. Runs on "
+                           "every cycle.")
+    p_do.add_argument("--judge", action="store_true",
+                      help="also have a separate grader call score it 0-10 "
+                           "(it must reach 6). Weaker than the checks above.")
+    p_do.add_argument("--survive-at", type=float, default=1.0, metavar="F",
+                      help="fraction of checks that must pass to survive "
+                           "(default 1.0: complete it or delete yourself)")
+    p_do.add_argument("--cycles", type=int, default=8,
+                      help="how many attempts to allow (default 8)")
+    p_do.add_argument("--workspace")
+    p_do.add_argument("--dry-run", action="store_true")
+    p_do.add_argument("--show", action="store_true",
+                      help="print the mission and stop, without running it")
+
     p_new = sub.add_parser("new", help="write a question file, by interview")
     p_new.add_argument("--output", default="prompt.txt",
                        help="where to write it (default: prompt.txt)")
@@ -109,15 +138,19 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _cost_notice(task: str, cycles: int) -> None:
     """Say what a run will cost before it starts spending."""
-    if task != "llm":
+    if task not in ("llm", "mission"):
         return
     backend = os.environ.get(llm.ENV_BACKEND, "anthropic").strip().lower()
     if backend != "anthropic":
-        print(f"note: llm task running on the {backend} backend — no API calls")
+        print(f"note: the {task} task is on the {backend} backend — "
+              f"no API calls")
         return
-    from .llm_task import suite
+    if task == "mission":
+        per_cycle = 4 if getattr(_cost_notice, "judged", False) else 2
+    else:
+        from .llm_task import suite
 
-    per_cycle = 2 * len(suite().items)
+        per_cycle = 2 * len(suite().items)
     print(f"note: the llm task calls {llm.DEFAULT_MODEL} — up to ~{per_cycle} "
           f"calls per cycle ({per_cycle * cycles} for {cycles}), minus cache "
           f"hits. Set {llm.ENV_BACKEND}=simulated to run it offline, or "
@@ -219,8 +252,72 @@ def _interview(output: Path) -> int:
     return 0
 
 
+def _do(args) -> int:
+    """Set one instruction as the mission, then run the lineage at it."""
+    workspace = _workspace(args)
+    mission = mission_mod.Mission(
+        instruction=args.instruction,
+        checks=mission_mod.parse_cli_checks(args),
+        judge=args.judge,
+        survive_at=max(0.0, min(1.0, args.survive_at)),
+    )
+    print(mission.describe())
+    print()
+    if args.show:
+        return 0
+
+    workspace.mkdir(parents=True, exist_ok=True)
+    path = mission.save(workspace / "mission.json")
+    os.environ[mission_mod.ENV_MISSION] = str(path)
+
+    _cost_notice.judged = args.judge
+    _cost_notice("mission", args.cycles)
+    orchestrator.init(workspace, force=True)
+
+    outputs: dict[str, str] = {}
+
+    def report(index, outcome):
+        verdict = outcome.get("verdict") or {}
+        text = (verdict.get("metrics") or {}).get("output")
+        if text:
+            outputs[outcome.get("generation") or "?"] = text
+        print(f"attempt {index + 1}: {_describe(outcome)}")
+
+    results = orchestrator.evolve(workspace, cycles=args.cycles, task="mission",
+                                  seed=7, armed=not args.dry_run,
+                                  on_step=report)
+    print()
+    print(lineage.Ledger(workspace).render_tree())
+    print()
+
+    head = lineage.Ledger(workspace).head()
+    if head is None:
+        print("The lineage is extinct: every generation that failed the task "
+              "deleted itself.")
+        if results:
+            last = results[-1].get("verdict") or {}
+            if last.get("detail"):
+                print(f"The last attempt: {last['detail']}")
+        print("To let it work toward the task over several attempts instead "
+              "of dying on the first miss, add --survive-at 0.5")
+        return 1
+
+    print(f"Survivor: {head.name} (score {head.score})")
+    if head.name in outputs:
+        print("\nWhat it produced:\n")
+        print(outputs[head.name])
+    return 0
+
+
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
+
+    if args.command == "do":
+        try:
+            return _do(args)
+        except mission_mod.MissionError as exc:
+            print(f"That task cannot be run as written:\n  {exc}")
+            return 1
 
     if args.command == "new":
         output = Path(args.output).expanduser()
