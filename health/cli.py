@@ -9,6 +9,7 @@
     health doctor               check credentials and connectivity
     health labs add FILE        add a blood panel (JSON or CSV)
     health labs [ANALYTE]       latest results, flags and trends
+    health brief [--week]       what the numbers mean today, and what to do
     health research "question"  search the literature, with citations
     health cycle [--metric M]   where you are, and how a metric moves by phase
     health lifts [EXERCISE]     strength progression, or one exercise's history
@@ -24,7 +25,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from . import research as research_api
@@ -35,7 +36,7 @@ from .features import (
     exercise_summary, progression, session_history, stale_lifts, weekly_volume,
 )
 from .config import load_config
-from .secrets import MissingSecret
+from .secrets import MissingSecret, get_secret
 from .sources import SOURCES
 from .store import Store
 from .sync import build_source, ingest_path, replay, sync_all
@@ -195,30 +196,46 @@ def cmd_schedule(args, config) -> int:
 
     if args.remove:
         print(scheduler.remove(config))
+        if args.brief is not None or scheduler.status(config, "brief")["installed"]:
+            print(scheduler.remove(config, "brief"))
         return 0
 
-    if args.install:
+    if args.no_brief:
+        print(scheduler.remove(config, "brief"))
+        return 0
+
+    if args.install or args.brief is not None:
         config.ensure_dirs()
         try:
-            _, message = scheduler.install(config, args.times)
+            if args.install:
+                _, message = scheduler.install(config, args.times)
+                print(message)
+            if args.brief is not None:
+                brief_time = args.brief or None
+                _, message = scheduler.install(config, brief_time, job="brief")
+                print(message)
         except ValueError as exc:
             raise SystemExit(str(exc))
-        print(message)
         return 0
 
-    state = scheduler.status(config)
-    if not state["installed"]:
+    shown = False
+    for job in ("sync", "brief"):
+        state = scheduler.status(config, job)
+        if not state["installed"]:
+            continue
+        shown = True
+        print(f"{job:<6} {'loaded' if state['loaded'] else 'installed, not loaded'}"
+              f" · {', '.join(state['times']) or 'no times'}")
+        print(f"       {state['plist']}")
+        if state["recent"]:
+            print("       last run: "
+                  + state["recent"].splitlines()[-1])
+    if not shown:
         print("Nothing scheduled. Sync only runs when you type it.\n"
               "  health schedule --install            # 07:15 and 19:15 daily\n"
-              "  health schedule --install --times 08:00")
-        return 0
-    print(f"{'loaded' if state['loaded'] else 'installed but not loaded'}"
-          f" · {', '.join(state['times']) or 'no times'}")
-    print(f"agent  {state['plist']}")
-    print(f"log    {state['log']}")
-    if state["recent"]:
-        print("\nlast run\n" + "\n".join("  " + line
-                                          for line in state["recent"].splitlines()))
+              "  health schedule --install --times 08:00\n"
+              "  health schedule --brief              # also write a brief at 07:45\n"
+              "                                       # (needs ANTHROPIC_API_KEY)")
     return 0
 
 
@@ -294,6 +311,47 @@ def cmd_sql(args, config) -> int:
     for row in rows:
         print(" | ".join("" if v is None else str(v) for v in row))
     print(f"\n{len(rows)} row(s)")
+    return 0
+
+
+def cmd_brief(args, config) -> int:
+    import json as _json
+
+    from . import brief as brief_mod
+
+    span = "week" if args.week else "today"
+    with _store(config, read_only=True) as store:
+        if args.no_send:
+            payload = (brief_mod.weekly_payload(store) if span == "week"
+                       else brief_mod.daily_payload(store))
+            print(_json.dumps(payload, indent=2, default=str))
+            print("\nThis is everything that would be sent. Nothing has left "
+                  "the machine.", file=sys.stderr)
+            return 0
+        get_secret("ANTHROPIC_API_KEY", config.config_dir)  # fail early, and clearly
+        try:
+            result = brief_mod.generate(store, config, span=span,
+                                        question=args.ask)
+        except Exception as exc:  # noqa: BLE001 - a briefing, not a crash site
+            raise SystemExit(f"{type(exc).__name__}: {exc}")
+
+    if args.json:
+        print(_json.dumps({"span": result.span, "text": result.text,
+                           "payload": result.payload, "usage": result.usage},
+                          indent=2, default=str))
+        return 0
+
+    print(result.text)
+    if args.save:
+        directory = config.data_dir / "briefs"
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / f"{date.today()}{'-week' if span == 'week' else ''}.md"
+        path.write_text(f"# {span} brief · {date.today()}\n\n{result.text}\n")
+        print(f"\nsaved to {path}", file=sys.stderr)
+    if result.usage:
+        print(f"\n{result.model} · {result.usage['input']}+{result.usage['output']} "
+              f"tokens · computed locally, only the labelled figures were sent",
+              file=sys.stderr)
     return 0
 
 
@@ -607,6 +665,20 @@ def build_parser() -> argparse.ArgumentParser:
     labs.add_argument("--lab", help="which lab ran it")
     labs.set_defaults(fn=cmd_labs)
 
+    brief_cmd = sub.add_parser("brief", help="what the numbers mean today, and "
+                                             "what to do about training")
+    brief_cmd.add_argument("--week", action="store_true",
+                           help="the weekly pass, with the cross-domain patterns")
+    brief_cmd.add_argument("--ask", metavar="QUESTION",
+                           help="a free-form question, answered against the same data")
+    brief_cmd.add_argument("--no-send", action="store_true",
+                           help="print exactly what would be sent, and stop")
+    brief_cmd.add_argument("--save", action="store_true",
+                           help="also write it to data/briefs/")
+    brief_cmd.add_argument("--json", action="store_true",
+                           help="machine-readable output")
+    brief_cmd.set_defaults(fn=cmd_brief)
+
     research = sub.add_parser("research", help="search the literature")
     research.add_argument("query", nargs="?", help="what to search for")
     research.add_argument("--analyte", help="search around one of your results")
@@ -638,6 +710,12 @@ def build_parser() -> argparse.ArgumentParser:
     schedule_cmd.add_argument("--install", action="store_true")
     schedule_cmd.add_argument("--remove", action="store_true")
     schedule_cmd.add_argument("--times", help="comma-separated, e.g. 07:15,19:15")
+    schedule_cmd.add_argument("--brief", nargs="?", const="", default=None,
+                              metavar="TIME",
+                              help="also write a daily brief (default 07:45); "
+                                   "needs ANTHROPIC_API_KEY")
+    schedule_cmd.add_argument("--no-brief", action="store_true",
+                              help="stop the daily brief agent")
     schedule_cmd.set_defaults(fn=cmd_schedule)
 
     backup_cmd = sub.add_parser("backup", help="archive raw/")

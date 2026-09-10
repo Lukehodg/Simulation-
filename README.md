@@ -26,15 +26,16 @@ Built and tested:
 | **Blood tests** | Panel import with unit conversion, reference-range flagging, phase-annotated trends |
 | **Research** | Europe PMC search returning study design, citations and DOIs |
 | **Daily features** | Robust baselines, deviations, training load, sleep regularity, autocorrelation-corrected correlations |
-| **Agent tools** | 19 MCP tools — the surface Claude actually talks to |
+| **Readiness & drivers** | A readiness-to-train call, personal sleep debt, what actually moves your recovery, strength vs. recovery, a phase-aware month |
+| **Brief** | `health brief` — the day (or the week) read back to you in two paragraphs, on a schedule if you want it |
+| **Agent tools** | 24 MCP tools — the surface Claude actually talks to |
 | **Interface** | A local page on 127.0.0.1, served from the same database |
 | **Bloods page** | Drop a report in, see what is flagged, ask Claude to read it |
 | **Indicators** | Per-domain status with the evidence behind each — deliberately no single score |
 | **Training observations** | Stalled, dormant, progressing and imbalanced, computed from your sets |
 
 Next: the Garmin export and `.FIT` parsers, energy availability (which needs
-Garmin's expenditure data), the morning brief as a scheduled job, and n-of-1
-experiment tracking.
+Garmin's expenditure data), and n-of-1 experiment tracking.
 
 ## Setup
 
@@ -290,7 +291,8 @@ whether a finding applies to you.
 ## Keeping it running
 
 ```sh
-health schedule --install              # 07:15 and 19:15 daily
+health schedule --install              # sync at 07:15 and 19:15 daily
+health schedule --brief                # also write a brief at 07:45
 health schedule                        # is it loaded, and what did the last run say
 health backup --to ~/Dropbox/health    # archive raw/
 ```
@@ -303,6 +305,11 @@ a sync that has been quietly failing for a fortnight is visible rather than
 assumed. A scheduled time that passes while the lid is shut runs on wake
 instead of being skipped. On anything that is not macOS it prints the cron line
 instead.
+
+`--brief` adds a second agent that runs `health brief --save` after the morning
+sync, logging to `data/logs/brief.log`. It is only installed if
+`ANTHROPIC_API_KEY` is set — the brief has nothing to do without it —
+and `health schedule --no-brief` removes it.
 
 Two syncs cannot run at once: DuckDB gives the file to a single writer, so a
 scheduled run that collides with a manual one now stops with a sentence rather
@@ -433,15 +440,53 @@ turns it into a comparison, and `panel_changes` reports what moved in both the
 bloods and the metrics, with cycle-sensitive analytes flagged as comparable
 only within the same phase.
 
+## The brief
+
+```sh
+health brief                     # the day, in two paragraphs
+health brief --week              # the week, plus its most interesting pattern
+health brief --ask "why has training felt hard this week?"
+health brief --no-send           # print exactly what would be sent, and stop
+```
+
+Where the rest of the system hands you numbers, this hands you a reading of
+them. It assembles the computed features — deviations from baseline, the
+readiness call, sleep debt, training load, cycle phase, and for the weekly pass
+the cross-domain passes below — into a small labelled payload, and Claude
+writes back what the body is saying and what to do about training today. It
+never sees a raw series and never does arithmetic; `--no-send` shows you the
+exact payload first, the same contract as the bloods page. Needs
+`ANTHROPIC_API_KEY`. `health schedule --brief` runs it every morning and drops
+the result in `data/briefs/`.
+
+The signals it is built on are also callable directly, on the CLI and through
+the agent:
+
+- **`readiness`** — one call on today's training (push / proceed / hold / pull
+  back) from recovery, load, sleep debt and cycle phase together, with every
+  reason and its number attached. Deliberately not a 0–100 score, for the same
+  reason there is no overall health score.
+- **`recovery_drivers`** — which of *your own* behaviours actually move your HRV
+  and resting heart rate, over 90 days, with the autocorrelation-corrected
+  intervals `correlate` uses and only the relationships whose interval clears
+  zero. It is a hypothesis generator and says so.
+- **`strength_recovery_link`** — whether your best sessions land on your
+  best-recovered days, per lift, as a residual from each lift's own trend, with
+  the sample size on every bucket.
+- **`phase_training_plan`** — where the heavy blocks and the deloads should fall
+  across the next few weeks, checked against your own phase signature rather
+  than the textbook. Says so plainly when there are no period logs yet.
+
 ## The agent
 
 ```sh
 claude mcp add health -- /path/to/.venv/bin/health mcp --root /path/to/project
 ```
 
-That exposes 19 tools — baselines, deviations, correlations, training load,
-lift progression, cycle phase, blood results, literature search, and a daily
-brief that pulls them together. Then you can just ask:
+That exposes 24 tools — baselines, deviations, correlations, training load,
+lift progression, cycle phase, blood results, literature search, the readiness
+call and its cross-domain siblings, and a daily brief that pulls them together.
+Then you can just ask:
 
 > *why has my sleep been bad since August?*
 > *am I actually getting stronger on RDLs, or just adding reps?*

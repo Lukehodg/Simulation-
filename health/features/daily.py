@@ -242,6 +242,28 @@ def _lag1(values: list[float]) -> float:
     return _pearson(values[:-1], values[1:]) or 0.0
 
 
+def _align(left: dict[date, float], right: dict[date, float],
+           lag_days: int) -> list[tuple[float, float]]:
+    """Pair `left` with `right` `lag_days` later, on the days both have."""
+    pairs = []
+    for day, value in sorted(left.items()):
+        target = day + timedelta(days=lag_days)
+        if target in right and value is not None and right[target] is not None:
+            pairs.append((value, right[target]))
+    return pairs
+
+
+def correlate_series(a: str, left: dict[date, float], b: str,
+                     right: dict[date, float], lag_days: int = 0) -> Correlation:
+    """`correlate` over series you have already built, rather than metric names.
+
+    For inputs that are not columns in `daily_metrics` — strength tonnage, the
+    hour of the last workout — so the same autocorrelation-corrected interval
+    covers them too.
+    """
+    return _correlate(a, b, lag_days, _align(left, right, lag_days))
+
+
 def correlate(store: Store, a: str, b: str, lag_days: int = 0,
               start: date | None = None, end: date | None = None) -> Correlation:
     """Relationship between two daily metrics, with honest uncertainty.
@@ -253,13 +275,11 @@ def correlate(store: Store, a: str, b: str, lag_days: int = 0,
     """
     left = dict(series(store, a, start, end))
     right = dict(series(store, b, start, end))
+    return _correlate(a, b, lag_days, _align(left, right, lag_days))
 
-    pairs = []
-    for day, value in sorted(left.items()):
-        target = day + timedelta(days=lag_days)
-        if target in right:
-            pairs.append((value, right[target]))
 
+def _correlate(a: str, b: str, lag_days: int,
+               pairs: list[tuple[float, float]]) -> Correlation:
     result = Correlation(a=a, b=b, lag_days=lag_days, n=len(pairs),
                          effective_n=len(pairs))
     if len(pairs) < MIN_CORRELATION_POINTS:

@@ -28,6 +28,7 @@ from .analytes import ANALYTES, canonical_analyte
 from .config import Config, load_config
 from .features import cycle as cycle_features
 from .features import daily, labs as lab_features
+from .features import readiness as readiness_features
 from .features import strength as strength_features
 from .research import evidence_query, search
 from .store import Store
@@ -41,10 +42,14 @@ How to use them well:
 - Every number you report should come from a tool call, not from memory or
   arithmetic of your own. If a tool says a baseline is unusable or a sample is
   too small, say that rather than working around it.
-- Deviations and correlations are hypotheses. `correlate` and `scan` return
-  confidence intervals and an effective sample size already corrected for
-  autocorrelation; an interval crossing zero means "consistent with nothing",
-  and a scan means many comparisons were made at once.
+- Deviations and correlations are hypotheses. `correlate`, `scan` and
+  `recovery_drivers` return confidence intervals and an effective sample size
+  already corrected for autocorrelation; an interval crossing zero means
+  "consistent with nothing", and a scan means many comparisons were made at once.
+- `readiness_call` gives a training recommendation with its reasons. Report the
+  recommendation and the reasons; do not turn it into a number or a percentage.
+  Training advice may be concrete — rep ranges, a load cap, train or skip —
+  when it is tied to a specific figure it returned.
 - Never compare HRV across devices. WHOOP reports RMSSD, Apple reports SDNN,
   and they are stored under different metric names for that reason.
 - For anyone with a menstrual cycle, judge a reading with
@@ -351,6 +356,56 @@ def literature_for_blood_result(analyte: str, context: str | None = None,
     return result
 
 
+@server.tool(description="Readiness to train on one day: a recommendation "
+                         "(push / proceed / hold / pull_back) with the recovery, "
+                         "load, sleep-debt and cycle-phase reasons behind it. "
+                         "Deliberately not a score.")
+@guarded
+def readiness_call(day: str | None = None) -> dict[str, Any]:
+    with _store() as store:
+        return readiness_features.readiness(store, _day(day)).as_dict()
+
+
+@server.tool(description="Rolling sleep debt over recent nights, against a need "
+                         "estimated from the person's own better-recovered days "
+                         "rather than a population figure.")
+@guarded
+def sleep_debt(as_of: str | None = None, days: int = 14) -> dict[str, Any]:
+    with _store() as store:
+        return readiness_features.sleep_debt(store, as_of=_day(as_of),
+                                             days=days).as_dict()
+
+
+@server.tool(description="Which of the person's own behaviours actually move "
+                         "their recovery, over a window. Autocorrelation-"
+                         "corrected intervals; only relationships whose interval "
+                         "clears zero are returned, with the comparison count.")
+@guarded
+def recovery_drivers(days: int = 90) -> dict[str, Any]:
+    with _store() as store:
+        return readiness_features.recovery_drivers(store, days=days)
+
+
+@server.tool(description="Whether the person's best strength sessions land on "
+                         "their best-recovered days, and whether training "
+                         "through a red day costs them. Per-exercise, with n on "
+                         "every bucket.")
+@guarded
+def strength_recovery_link(days: int = 180) -> dict[str, Any]:
+    with _store() as store:
+        return readiness_features.strength_recovery_link(store, days=days)
+
+
+@server.tool(description="Where heavy blocks and deloads should fall across the "
+                         "next few weeks of the cycle, checked against the "
+                         "person's own phase signature. Says so when there is no "
+                         "cycle data.")
+@guarded
+def phase_training_plan(weeks: int = 4) -> dict[str, Any]:
+    with _store() as store:
+        return readiness_features.phase_training_plan(store, weeks=weeks)
+
+
 @server.tool(description="A briefing for one day: what the body is saying, "
                          "against baselines and cycle phase where available.")
 @guarded
@@ -365,6 +420,8 @@ def daily_brief(day: str | None = None) -> dict[str, Any]:
             "metrics": [{"metric": m, "value": v, "source": s} for m, v, s in metrics],
             "deviations": [{"metric": m, "value": v, "z": z}
                            for m, v, z in daily.deviations(store, target)],
+            "readiness": readiness_features.readiness(store, target).as_dict(),
+            "sleep_debt": readiness_features.sleep_debt(store, as_of=target).as_dict(),
             "training_load": daily.training_load(store, as_of=target).describe(),
             "sleep_regularity": daily.sleep_regularity(store, as_of=target),
         }

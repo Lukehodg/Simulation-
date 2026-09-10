@@ -26,8 +26,8 @@ from typing import Any
 from .analytes import ANALYTES
 from .config import Config
 from .features import labs as lab_features
+from .llm import client as _client
 from .research import Paper, evidence_query, search
-from .secrets import get_secret
 from .store import Store
 
 MODEL = "claude-opus-5"
@@ -199,13 +199,6 @@ def gather_literature(store: Store, limit_per_analyte: int = 3
             seen.add(key)
             unique.append(paper)
     return unique, None
-
-
-def _client(config: Config):
-    import anthropic
-
-    key = get_secret("ANTHROPIC_API_KEY", config.config_dir, required=False)
-    return anthropic.Anthropic(api_key=key) if key else anthropic.Anthropic()
 
 
 def analyse(store: Store, config: Config, question: str | None = None,

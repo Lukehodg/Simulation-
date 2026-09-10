@@ -54,7 +54,7 @@ def test_the_cron_fallback_says_the_same_thing(config):
 
 def test_status_reports_nothing_when_nothing_is_scheduled(config, monkeypatch, tmp_path):
     monkeypatch.setattr(schedule, "plan",
-                        lambda cfg, times=None: schedule.Schedule(
+                        lambda cfg, times=None, job="sync": schedule.Schedule(
                             label="x", plist_path=tmp_path / "absent.plist",
                             times=(), log=tmp_path / "sync.log"))
     assert schedule.status(config)["installed"] is False

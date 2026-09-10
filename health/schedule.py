@@ -1,4 +1,4 @@
-"""Making the sync run without you.
+"""Making the sync — and, optionally, the brief — run without you.
 
 Everything in this project assumes data keeps arriving. It does not, unless
 something runs `health sync` — so this writes a launchd agent on macOS (and
@@ -9,6 +9,11 @@ Two properties that matter on a laptop rather than a server: a job whose time
 passes while the machine is asleep runs when it wakes, rather than being
 skipped until tomorrow; and output goes to a log inside the project, so a sync
 that has been quietly failing for a fortnight is visible rather than assumed.
+
+There are two jobs. `sync` is the one that must run. `brief` is opt-in: it runs
+`health brief --save` a little after the morning sync and drops the day's
+reading in `data/briefs/`, and it is only installed when an Anthropic key is
+available for it to use.
 """
 
 from __future__ import annotations
@@ -21,9 +26,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .config import Config
+from .secrets import get_secret
 
-LABEL = "com.health.sync"
-DEFAULT_TIMES = ("07:15", "19:15")
+#: job -> (launchd label, trailing CLI args, log filename, default times)
+JOBS: dict[str, tuple[str, tuple[str, ...], str, tuple[str, ...]]] = {
+    "sync": ("com.health.sync", ("sync",), "sync.log", ("07:15", "19:15")),
+    "brief": ("com.health.brief", ("brief", "--save"), "brief.log", ("07:45",)),
+}
 
 
 @dataclass
@@ -32,11 +41,12 @@ class Schedule:
     plist_path: Path
     times: tuple[str, ...]
     log: Path
+    program: tuple[str, ...] = ("sync",)
 
 
-def _parse_times(times: str | None) -> tuple[str, ...]:
+def _parse_times(times: str | None, default: tuple[str, ...]) -> tuple[str, ...]:
     if not times:
-        return DEFAULT_TIMES
+        return default
     out = []
     for item in times.split(","):
         hour, _, minute = item.strip().partition(":")
@@ -57,13 +67,14 @@ def executable() -> str:
     return str(candidate if candidate.exists() else "health")
 
 
-def plan(config: Config, times: str | None = None) -> Schedule:
-    parsed = _parse_times(times)
+def plan(config: Config, times: str | None = None, job: str = "sync") -> Schedule:
+    label, program, log_name, default_times = JOBS[job]
     return Schedule(
-        label=LABEL,
-        plist_path=Path("~/Library/LaunchAgents").expanduser() / f"{LABEL}.plist",
-        times=parsed,
-        log=config.data_dir / "logs" / "sync.log",
+        label=label,
+        plist_path=Path("~/Library/LaunchAgents").expanduser() / f"{label}.plist",
+        times=_parse_times(times, default_times),
+        log=config.data_dir / "logs" / log_name,
+        program=program,
     )
 
 
@@ -72,7 +83,8 @@ def plist(config: Config, schedule: Schedule) -> dict:
     anything to disk."""
     return {
         "Label": schedule.label,
-        "ProgramArguments": [executable(), "--root", str(config.root), "sync"],
+        "ProgramArguments": [executable(), "--root", str(config.root),
+                             *schedule.program],
         "WorkingDirectory": str(config.root),
         "EnvironmentVariables": {
             "HEALTH_TIMEZONE": str(config.timezone),
@@ -97,35 +109,44 @@ def cron_line(config: Config, schedule: Schedule) -> str:
     minutes = ",".join(sorted({t.split(":")[1].lstrip("0") or "0" for t in schedule.times}))
     hours = ",".join(sorted({t.split(":")[0].lstrip("0") or "0" for t in schedule.times},
                             key=int))
-    return (f"{minutes} {hours} * * *  {executable()} --root {config.root} sync "
+    program = " ".join(schedule.program)
+    return (f"{minutes} {hours} * * *  {executable()} --root {config.root} {program} "
             f">> {schedule.log} 2>&1")
 
 
-def install(config: Config, times: str | None = None) -> tuple[Schedule, str]:
-    """Write and load the agent. Returns the schedule and what happened."""
-    schedule = plan(config, times)
+def _load(schedule: Schedule, config: Config) -> str:
     schedule.log.parent.mkdir(parents=True, exist_ok=True)
-
     if platform.system() != "Darwin":
-        return schedule, ("not macOS — add this to your crontab instead:\n  "
-                          + cron_line(config, schedule))
+        return ("not macOS — add this to your crontab instead:\n  "
+                + cron_line(config, schedule))
 
     schedule.plist_path.parent.mkdir(parents=True, exist_ok=True)
     schedule.plist_path.write_bytes(plistlib.dumps(plist(config, schedule)))
-
     subprocess.run(["launchctl", "unload", str(schedule.plist_path)],
                    capture_output=True)
     result = subprocess.run(["launchctl", "load", str(schedule.plist_path)],
                             capture_output=True, text=True)
     if result.returncode != 0:
-        return schedule, f"wrote {schedule.plist_path} but launchctl said: {result.stderr.strip()}"
-    return schedule, f"loaded · syncing at {', '.join(schedule.times)} daily"
+        return f"wrote {schedule.plist_path} but launchctl said: {result.stderr.strip()}"
+    return f"loaded · {' '.join(schedule.program)} at {', '.join(schedule.times)} daily"
 
 
-def remove(config: Config) -> str:
-    schedule = plan(config)
+def install(config: Config, times: str | None = None,
+            job: str = "sync") -> tuple[Schedule, str]:
+    """Write and load an agent. Returns the schedule and what happened."""
+    schedule = plan(config, times, job=job)
+    if job == "brief" and not get_secret("ANTHROPIC_API_KEY", config.config_dir,
+                                         required=False):
+        return schedule, ("ANTHROPIC_API_KEY is not set, and the brief needs it "
+                          "to write anything — skipped. Add the key, then "
+                          "`health schedule --brief`.")
+    return schedule, _load(schedule, config)
+
+
+def remove(config: Config, job: str = "sync") -> str:
+    schedule = plan(config, job=job)
     if not schedule.plist_path.exists():
-        return "nothing scheduled"
+        return f"nothing scheduled for {job}"
     if platform.system() == "Darwin":
         subprocess.run(["launchctl", "unload", str(schedule.plist_path)],
                        capture_output=True)
@@ -133,13 +154,13 @@ def remove(config: Config) -> str:
     return f"removed {schedule.plist_path}"
 
 
-def status(config: Config) -> dict:
-    schedule = plan(config)
+def status(config: Config, job: str = "sync") -> dict:
+    schedule = plan(config, job=job)
     installed = schedule.plist_path.exists()
     loaded = False
     if installed and platform.system() == "Darwin":
         result = subprocess.run(["launchctl", "list"], capture_output=True, text=True)
-        loaded = LABEL in result.stdout
+        loaded = schedule.label in result.stdout
 
     times: tuple[str, ...] = ()
     if installed:
@@ -155,6 +176,6 @@ def status(config: Config) -> dict:
         lines = schedule.log.read_text(errors="replace").strip().splitlines()
         tail = "\n".join(lines[-8:])
 
-    return {"installed": installed, "loaded": loaded, "times": times,
+    return {"job": job, "installed": installed, "loaded": loaded, "times": times,
             "plist": str(schedule.plist_path), "log": str(schedule.log),
             "recent": tail}
