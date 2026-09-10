@@ -41,6 +41,12 @@ class Task:
     #: Whether the task's prompt clauses are part of what evolves.
     evolves_prompt = False
 
+    def clause_pool(self) -> int:
+        """How many prompt clauses exist to choose between."""
+        from . import genome
+
+        return genome.CLAUSE_POOL
+
     def run(self, params: dict, *, seed: int = 0,
             clauses=()) -> Verdict:  # pragma: no cover
         raise NotImplementedError

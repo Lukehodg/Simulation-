@@ -17,6 +17,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from . import promptpack
 from .errors import TaskUnavailable
 from .llm import EFFORT_LEVELS, Backend, Reply, build_client
 from .tasks import Task, Verdict
@@ -76,10 +77,53 @@ ITEMS: tuple[Item, ...] = (
 )
 
 
-def build_system(clauses) -> str:
-    """The evolved system prompt: base instruction plus the chosen clauses."""
-    chosen = [CLAUSES[i] for i in clauses if 0 <= i < len(CLAUSES)]
-    return "\n".join([BASE_SYSTEM, *chosen])
+# --------------------------------------------------------------------------
+# The live question set: the built-in one, or whatever the user's file says.
+# --------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class Suite:
+    job: str
+    clauses: tuple[str, ...]
+    items: tuple[Item, ...]
+    custom: bool = False
+    source: str = "built in"
+
+
+BUILTIN = Suite(BASE_SYSTEM, CLAUSES, ITEMS)
+
+_cached: tuple[str, Suite] | None = None
+
+
+def suite() -> Suite:
+    """The question set in force, reloaded when the file behind it changes."""
+    global _cached
+    import os
+
+    marker = os.environ.get(promptpack.ENV_PACK, "")
+    if _cached is not None and _cached[0] == marker:
+        return _cached[1]
+
+    if not marker:
+        loaded = BUILTIN
+    else:
+        pack = promptpack.load(marker)
+        loaded = Suite(
+            job=pack.job,
+            clauses=tuple(pack.instructions),
+            items=tuple(Item(i.question, i.answer) for i in pack.items),
+            custom=True,
+            source=str(pack.path),
+        )
+    _cached = (marker, loaded)
+    return loaded
+
+
+def build_system(clauses, active: Suite | None = None) -> str:
+    """The evolved system prompt: the job line plus the chosen clauses."""
+    active = active or suite()
+    chosen = [active.clauses[i] for i in clauses if 0 <= i < len(active.clauses)]
+    return "\n".join([active.job, *chosen])
 
 
 def normalise(text: str) -> str:
@@ -117,6 +161,14 @@ class SimulatedBackend(Backend):
 
     def complete(self, *, system: str, user: str, effort: str,
                  max_tokens: int) -> Reply:
+        active = suite()
+        if active.custom:
+            # Nothing is known about how a hand-written question responds to
+            # wording, so the stand-in just answers it. Useful for proving the
+            # file parses and the loop runs; useless as a score.
+            item = next((i for i in active.items if i.question in user), None)
+            return Reply(text=item.answer if item else "", output_tokens=24)
+
         present = {i for i, clause in enumerate(CLAUSES) if clause in system}
         # A firm instruction in the user turn is the last thing the model
         # reads, so it overrides the standing style clauses.
@@ -154,19 +206,24 @@ class LLMPromptTask(Task):
     genes = ("llm_effort", "llm_answer_tokens", "llm_reask_limit")
     evolves_prompt = True
 
+    def clause_pool(self) -> int:
+        return len(suite().clauses)
+
     def run(self, params, *, seed: int = 0, clauses=()) -> Verdict:
         effort_index = int(params.get("llm_effort", 1))
         effort = EFFORT_LEVELS[max(0, min(len(EFFORT_LEVELS) - 1, effort_index))]
         max_tokens = int(params.get("llm_answer_tokens", 1024))
         reasks = int(params.get("llm_reask_limit", 0))
 
+        active = suite()
         client = build_client()
-        system = build_system(clauses)
+        system = build_system(clauses, active)
+        plainest = active.clauses[0] if active.clauses else CLAUSES[0]
 
         correct = 0
         unusable = 0
         refusals = 0
-        for item in ITEMS:
+        for item in active.items:
             reply = client.ask(system=system, user=item.question, effort=effort,
                                max_tokens=max_tokens)
             attempt = 0
@@ -176,14 +233,14 @@ class LLMPromptTask(Task):
                 # formatting demand last, where it carries the most weight.
                 reply = client.ask(
                     system=system,
-                    user=f"{item.question}\n\n{CLAUSES[0]}",
+                    user=f"{item.question}\n\n{plainest}",
                     effort=effort, max_tokens=max_tokens,
                 )
             refusals += 1 if reply.refused else 0
             unusable += 1 if looks_unusable(reply.text) else 0
-            correct += 1 if normalise(reply.text) == item.answer else 0
+            correct += 1 if normalise(reply.text) == normalise(item.answer) else 0
 
-        total = len(ITEMS)
+        total = len(active.items)
         accuracy = correct / total
         avg_tokens = client.output_tokens / total
         # Accuracy is what counts; the token term is a light nudge away from
@@ -192,6 +249,8 @@ class LLMPromptTask(Task):
         detail = (f"{correct}/{total} exact, {unusable} unusable, "
                   f"{client.calls} calls ({client.cache_hits} cached), "
                   f"{avg_tokens:.0f} output tokens/item")
+        if active.custom and client.backend.name == "simulated":
+            detail += " [simulated backend on a custom file: scores mean nothing]"
         return Verdict(
             passed=accuracy >= PASS_MARK,
             score=score,
@@ -201,7 +260,8 @@ class LLMPromptTask(Task):
                      "refusals": refusals, "calls": client.calls,
                      "cache_hits": client.cache_hits,
                      "avg_output_tokens": round(avg_tokens, 1),
-                     "effort": effort, "clauses": list(clauses)},
+                     "effort": effort, "clauses": list(clauses),
+                     "suite": active.source},
         )
 
 
@@ -209,5 +269,5 @@ def register(registry: dict) -> None:
     registry[LLMPromptTask.name] = LLMPromptTask()
 
 
-__all__ = ["CLAUSES", "ITEMS", "LLMPromptTask", "SimulatedBackend",
-           "TaskUnavailable", "build_system", "normalise", "register"]
+__all__ = ["CLAUSES", "ITEMS", "LLMPromptTask", "SimulatedBackend", "Suite",
+           "TaskUnavailable", "build_system", "normalise", "register", "suite"]

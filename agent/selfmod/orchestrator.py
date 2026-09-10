@@ -15,7 +15,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from . import genome, lineage, llm
+from . import genome, lineage, llm, promptpack
 from .agent import IGNORE
 from .sandbox import MARKER, Sandbox
 
@@ -32,6 +32,10 @@ def generations_dir(workspace: Path) -> Path:
 
 
 def init(workspace: Path, *, force: bool = False) -> dict:
+    # Read the question file before anything is created, so a typo in it
+    # leaves no half-seeded workspace behind.
+    pack = promptpack.active()
+
     workspace = Path(workspace).resolve()
     workspace.mkdir(parents=True, exist_ok=True)
     ledger = lineage.Ledger(workspace)
@@ -59,9 +63,21 @@ def init(workspace: Path, *, force: bool = False) -> dict:
         json.dumps({"parent": None, "born_from": str(source_root())}) + "\n",
         encoding="utf-8",
     )
+    # A question file may say which instructions generation 1 starts with;
+    # that seeds the prompt gene of the copy, not the source tree.
+    clauses = list(genome.PROMPT_CLAUSES)
+    detail = "seeded from source tree"
+    if pack is not None:
+        clauses = list(pack.start)
+        genome.rewrite(home / "selfmod" / "genome.py", generation=1,
+                       ancestry="seed", params=dict(genome.PARAMS),
+                       clauses=clauses, pool=len(pack.instructions))
+        detail = f"seeded from source tree with questions from {pack.path}"
+
     ledger.record(lineage.BORN, name, parent=None, params=dict(genome.PARAMS),
-                  detail="seeded from source tree")
-    return {"created": True, "head": name, "home": str(home)}
+                  clauses=clauses, detail=detail)
+    return {"created": True, "head": name, "home": str(home),
+            "questions": str(pack.path) if pack else None}
 
 
 def run_cycle(workspace: Path, *, task: str = "pathfind", seed: int = 7,

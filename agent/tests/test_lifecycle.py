@@ -199,6 +199,55 @@ class LifecycleTests(unittest.TestCase):
         self.assertTrue(cache.is_dir())
         self.assertTrue(any(cache.iterdir()))
 
+    # -- a hand-written question file -------------------------------------
+    def test_a_question_file_seeds_and_drives_the_lineage(self):
+        import os
+
+        from selfmod import promptpack
+
+        path = Path(self._tmp.name) / "prompt.txt"
+        path.write_text(
+            "job: Name the county.\n"
+            "instruction: Answer with the county only.\n"
+            "instruction: Do not add the word county.\n"
+            "start: 1\n"
+            "Q: Which county is Oxford in?\nA: oxfordshire\n"
+            "Q: Which county is Lancaster in?\nA: lancashire\n",
+            encoding="utf-8",
+        )
+        os.environ[promptpack.ENV_PACK] = str(path)
+        try:
+            orchestrator.init(self.workspace, force=True)
+            seed_src = (self.gen_dir("gen-0001") / "selfmod"
+                        / "genome.py").read_text()
+            self.assertIn("PROMPT_CLAUSES = [0]", seed_src)
+
+            outcome = orchestrator.run_cycle(self.workspace, task="llm", seed=7)
+            self.assertNotEqual(outcome["action"], "task-unavailable",
+                                outcome.get("detail"))
+            self.assertIn(outcome["action"], ("upgraded", "child-rejected",
+                                              "no-mutation"))
+            self.assertEqual(outcome["verdict"]["metrics"]["items"], 2)
+            self.assertEqual(outcome["verdict"]["metrics"]["suite"], str(path))
+        finally:
+            os.environ.pop(promptpack.ENV_PACK, None)
+
+    def test_a_broken_question_file_stops_init_without_seeding(self):
+        import os
+
+        from selfmod import promptpack
+
+        path = Path(self._tmp.name) / "broken.txt"
+        path.write_text("Q: no answer follows\n", encoding="utf-8")
+        os.environ[promptpack.ENV_PACK] = str(path)
+        try:
+            fresh = Path(self._tmp.name) / "fresh-workspace"
+            with self.assertRaises(promptpack.PackError):
+                orchestrator.init(fresh)
+            self.assertFalse(fresh.exists(), "a broken file left a workspace")
+        finally:
+            os.environ.pop(promptpack.ENV_PACK, None)
+
     # -- reporting --------------------------------------------------------
     def test_status_and_tree_describe_the_lineage(self):
         self.advance_to_upgrade()

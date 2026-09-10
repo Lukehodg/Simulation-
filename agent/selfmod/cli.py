@@ -16,7 +16,7 @@ from pathlib import Path
 import os
 
 from . import agent as agent_mod
-from . import genome, lineage, llm, orchestrator, tasks
+from . import genome, lineage, llm, orchestrator, promptpack, tasks
 
 DEFAULT_WORKSPACE = "workspace"
 
@@ -25,6 +25,19 @@ def _workspace(args) -> Path:
     if args.workspace:
         return Path(args.workspace).expanduser().resolve()
     return (orchestrator.source_root() / DEFAULT_WORKSPACE).resolve()
+
+
+def _add_questions(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--questions", metavar="FILE",
+                        help="your own job, instructions and questions, in a "
+                             "plain text file (see `selfmod new`)")
+
+
+def _use_questions(args) -> None:
+    """Publish the question file to every process this one starts."""
+    path = getattr(args, "questions", None)
+    if path:
+        os.environ[promptpack.ENV_PACK] = str(Path(path).expanduser().resolve())
 
 
 def _add_common(parser: argparse.ArgumentParser) -> None:
@@ -37,6 +50,7 @@ def _add_common(parser: argparse.ArgumentParser) -> None:
                         help="task seed; the same seed replays the same suite")
     parser.add_argument("--dry-run", action="store_true",
                         help="run every check but never actually delete")
+    _add_questions(parser)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -51,6 +65,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_init.add_argument("--workspace")
     p_init.add_argument("--force", action="store_true",
                         help="delete an existing lineage and start over")
+    _add_questions(p_init)
+
+    p_new = sub.add_parser("new", help="write a question file, by interview")
+    p_new.add_argument("--output", default="prompt.txt",
+                       help="where to write it (default: prompt.txt)")
+    p_new.add_argument("--template", action="store_true",
+                       help="just write an example file to edit by hand")
+
+    p_check = sub.add_parser("check", help="check a question file and show "
+                                           "the prompt it produces")
+    p_check.add_argument("questions", metavar="FILE")
 
     p_run = sub.add_parser("run", help="run one cycle as the living head")
     _add_common(p_run)
@@ -68,11 +93,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_status.add_argument("--workspace")
     p_status.add_argument("--json", action="store_true")
 
-    p_check = sub.add_parser("selfcheck",
+    p_selfcheck = sub.add_parser("selfcheck",
                              help="evaluate the genome of the running copy")
-    p_check.add_argument("--task", default="pathfind")
-    p_check.add_argument("--seed", type=int, default=7)
-    p_check.add_argument("--json", action="store_true")
+    p_selfcheck.add_argument("--task", default="pathfind")
+    p_selfcheck.add_argument("--seed", type=int, default=7)
+    p_selfcheck.add_argument("--json", action="store_true")
 
     p_cycle = sub.add_parser("cycle", help="internal: live one cycle in place")
     _add_common(p_cycle)
@@ -90,9 +115,9 @@ def _cost_notice(task: str, cycles: int) -> None:
     if backend != "anthropic":
         print(f"note: llm task running on the {backend} backend — no API calls")
         return
-    from .llm_task import ITEMS
+    from .llm_task import suite
 
-    per_cycle = 2 * len(ITEMS)
+    per_cycle = 2 * len(suite().items)
     print(f"note: the llm task calls {llm.DEFAULT_MODEL} — up to ~{per_cycle} "
           f"calls per cycle ({per_cycle * cycles} for {cycles}), minus cache "
           f"hits. Set {llm.ENV_BACKEND}=simulated to run it offline, or "
@@ -125,11 +150,120 @@ def _describe(outcome: dict) -> str:
     return "  ".join(b for b in bits if b)
 
 
+def _ask(prompt: str) -> str:
+    try:
+        return input(prompt).strip()
+    except EOFError:
+        return ""
+
+
+def _interview(output: Path) -> int:
+    """Write a question file by asking for it, one line at a time."""
+    print("Let's write your question file. Press Enter on a blank line to "
+          "move on.\n")
+
+    job = _ask("What should this agent do? (one line)\n> ") or promptpack.DEFAULT_JOB
+
+    print("\nNow the instruction lines it is allowed to use. It will try "
+          "adding,\ndropping and reordering these to see which wording "
+          "scores best.\nGive it two or three to start with.")
+    instructions: list[str] = []
+    while len(instructions) < promptpack.MAX_INSTRUCTIONS:
+        line = _ask(f"  instruction {len(instructions) + 1} > ")
+        if not line:
+            break
+        instructions.append(line)
+    if not instructions:
+        instructions = ["Reply with the value only: no units, no punctuation, "
+                        "no explanation."]
+        print("  (none given — I put in one sensible default)")
+
+    print("\nNow the questions, each with the exact answer you will accept.\n"
+          "Grading ignores capitalisation and a trailing full stop, and "
+          "nothing else.")
+    items: list[promptpack.PackItem] = []
+    while True:
+        question = _ask(f"  question {len(items) + 1} > ")
+        if not question:
+            break
+        answer = _ask("    exact answer > ")
+        if not answer:
+            print("    (no answer given — question skipped)")
+            continue
+        items.append(promptpack.PackItem(question, answer))
+    if not items:
+        print("\nNo questions, so there is nothing to score. Nothing written.")
+        return 1
+
+    lines = [f"job: {job}", ""]
+    lines += [f"instruction: {text}" for text in instructions]
+    lines += ["", "# generation 1 starts with instruction 1 only, so there is "
+                  "room to improve", "start: 1", ""]
+    for item in items:
+        lines += [f"Q: {item.question}", f"A: {item.answer}", ""]
+    text = "\n".join(lines)
+
+    try:
+        pack = promptpack.parse_text(text)
+    except promptpack.PackError as exc:  # pragma: no cover - defensive
+        print(f"\nSomething in that is not usable: {exc}")
+        return 1
+
+    output.write_text(text, encoding="utf-8")
+    print(f"\nWritten to {output} — {pack.summary()}.\n")
+    print("Next, in this order:")
+    print(f"  python3 -m selfmod check {output}")
+    print(f"  python3 -m selfmod init --force --questions {output}")
+    print(f"  python3 -m selfmod evolve --task llm --questions {output} "
+          f"--cycles 20")
+    return 0
+
+
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
 
+    if args.command == "new":
+        output = Path(args.output).expanduser()
+        if output.exists():
+            print(f"{output} already exists — delete it or pass --output "
+                  f"with another name.")
+            return 1
+        if args.template:
+            promptpack.write_template(output)
+            print(f"Wrote an example to {output}. Open it in any text editor, "
+                  f"change the lines, then run:\n"
+                  f"  python3 -m selfmod check {output}")
+            return 0
+        try:
+            return _interview(output)
+        except KeyboardInterrupt:
+            print("\nStopped. Nothing written.")
+            return 1
+
+    if args.command == "check":
+        try:
+            pack = promptpack.load(args.questions)
+        except promptpack.PackError as exc:
+            print(f"That file will not work yet:\n  {exc}")
+            return 1
+        print(promptpack.render(pack))
+        print()
+        print("Looks usable. Next:")
+        print(f"  python3 -m selfmod init --force --questions {args.questions}")
+        return 0
+
+    try:
+        _use_questions(args)
+    except OSError as exc:
+        print(f"could not use that question file: {exc}")
+        return 1
+
     if args.command == "init":
-        result = orchestrator.init(_workspace(args), force=args.force)
+        try:
+            result = orchestrator.init(_workspace(args), force=args.force)
+        except promptpack.PackError as exc:
+            print(f"That question file will not work yet:\n  {exc}")
+            return 1
         print(json.dumps(result, indent=2))
         return 0 if result.get("created") or result.get("head") else 1
 

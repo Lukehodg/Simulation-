@@ -71,18 +71,23 @@ def clamp(params: dict) -> dict:
     return out
 
 
-def clamp_clauses(clauses) -> list[int]:
-    """Valid clause indices, de-duplicated, order preserved."""
+def clamp_clauses(clauses, pool: int | None = None) -> list[int]:
+    """Valid clause indices, de-duplicated, order preserved.
+
+    ``pool`` is how many clauses exist; it varies when the question set comes
+    from a user's file rather than the built-in one.
+    """
+    limit = CLAUSE_POOL if pool is None else pool
     seen: list[int] = []
     for value in clauses:
         index = int(value)
-        if 0 <= index < CLAUSE_POOL and index not in seen:
+        if 0 <= index < limit and index not in seen:
             seen.append(index)
     return seen
 
 
 def render_block(generation: int, ancestry: str, params: dict,
-                 clauses=()) -> str:
+                 clauses=(), pool: int | None = None) -> str:
     lines = [
         BEGIN + " (rewritten by selfmod.genome.rewrite; edit by hand freely)",
         f"GENERATION = {int(generation)}",
@@ -92,13 +97,13 @@ def render_block(generation: int, ancestry: str, params: dict,
     for key in sorted(params):
         lines.append(f"    {key!r}: {params[key]!r},")
     lines.append("}")
-    lines.append(f"PROMPT_CLAUSES = {clamp_clauses(clauses)!r}")
+    lines.append(f"PROMPT_CLAUSES = {clamp_clauses(clauses, pool)!r}")
     lines.append(END)
     return "\n".join(lines)
 
 
 def rewrite(path: Path, *, generation: int, ancestry: str, params: dict,
-            clauses=()) -> str:
+            clauses=(), pool: int | None = None) -> str:
     """Replace the genome block inside the ``genome.py`` file at ``path``."""
     source = Path(path).read_text(encoding="utf-8")
     pattern = re.compile(
@@ -106,7 +111,7 @@ def rewrite(path: Path, *, generation: int, ancestry: str, params: dict,
     )
     if not pattern.search(source):
         raise ValueError(f"no genome block found in {path}")
-    block = render_block(generation, ancestry, clamp(params), clauses)
+    block = render_block(generation, ancestry, clamp(params), clauses, pool)
     updated = pattern.sub(lambda _: block, source, count=1)
     Path(path).write_text(updated, encoding="utf-8")
     return block

@@ -174,7 +174,7 @@ class Agent:
         mutate_prompt = task.evolves_prompt and rng.random() < 0.6
         if mutate_prompt:
             child_clauses, clause_note = mutate.propose_clauses(
-                child_clauses, genome.CLAUSE_POOL, rng=rng, pressure=pressure,
+                child_clauses, task.clause_pool(), rng=rng, pressure=pressure,
             )
             child_params, note = dict(genome.PARAMS), clause_note
         else:
@@ -201,6 +201,7 @@ class Agent:
             ancestry=f"{genome.ANCESTRY}>{self.name}",
             params=child_params,
             clauses=child_clauses,
+            pool=task.clause_pool(),
         )
         self.ledger.record(
             lineage.BORN, child_name, parent=self.name, params=child_params,
@@ -274,7 +275,9 @@ class Agent:
 def selfcheck(task: str = "pathfind", seed: int = 7) -> dict:
     """What a child runs to prove it is a working, better agent than its parent."""
     problems = []
-    if genome.clamp_clauses(genome.PROMPT_CLAUSES) != list(genome.PROMPT_CLAUSES):
+    pool = tasks.get(task).clause_pool()
+    if (genome.clamp_clauses(genome.PROMPT_CLAUSES, pool)
+            != list(genome.PROMPT_CLAUSES)):
         problems.append(f"prompt clauses {genome.PROMPT_CLAUSES} are not valid")
     for key, value in genome.PARAMS.items():
         low, high = genome.BOUNDS.get(key, (None, None))

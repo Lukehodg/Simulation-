@@ -63,6 +63,8 @@ deleting nothing.
 | `lineage` | Print the family tree with scores and outcomes. |
 | `status [--json]` | Head, living generations, best score, and any divergence between the ledger and the disk. |
 | `selfcheck [--json]` | Evaluate the genome of the copy you are running. This is what a child runs to prove itself. |
+| `new [--template]` | Write a question file — by interview, or as an example to edit. |
+| `check FILE` | Validate a question file and print the prompt it produces. |
 | `cycle --home DIR` | Internal: the entry point a generation is launched through. |
 
 ## How a cycle actually runs
@@ -167,11 +169,78 @@ The seed prompt gets 4 of 8; the lineage ends on the clause set that gets all
 that invite prose get proposed too — each of those children scored 0/8 and
 deleted itself.
 
+### Using your own questions — no Python
+
+`selfmod new` interviews you and writes a plain text file; nothing else needs
+editing.
+
+```console
+$ python3 -m selfmod new
+What should this agent do? (one line)
+> Say which UK city each landmark is in.
+
+Now the instruction lines it is allowed to use...
+  instruction 1 > Answer with the city name only.
+  instruction 2 > Do not add the country.
+  instruction 3 >
+
+Now the questions, each with the exact answer you will accept...
+  question 1 > Which city is the Angel of the North in?
+    exact answer > gateshead
+  question 2 >
+
+Written to prompt.txt — 1 questions, 2 instructions, starting with [0].
+```
+
+Then check it, seed a lineage from it, and run:
+
+```console
+$ python3 -m selfmod check prompt.txt
+$ python3 -m selfmod init --force --questions prompt.txt
+$ python3 -m selfmod evolve --task llm --questions prompt.txt --cycles 20
+```
+
+`check` prints the starting prompt and every question back at you, and refuses
+files with problems, naming the line: a question with no answer, an answer
+with no question, two identical questions, a `start:` number that points at no
+instruction. `init` reads the file before it creates anything, so a typo never
+leaves half a workspace behind.
+
+`selfmod new --template` writes an example file to edit by hand instead of
+answering questions. The format is forgiving — `#` comments, blank lines,
+`Q:`/`A:` pairs or `question | answer` on one line:
+
+```
+job: Say which UK city each landmark is in.
+
+instruction: Answer with the city name only.
+instruction: Do not add the country.
+
+start: 1
+
+Q: Which city is the Angel of the North in?
+A: gateshead
+
+Which city is the Bullring in? | birmingham
+```
+
+`job:` is the fixed first line of every prompt. The `instruction:` lines are
+the pool the agent evolves — it adds, drops and reorders them. `start:` says
+which of them generation 1 begins with, numbered as you typed them; leave it
+out and it starts with none. Answers are matched ignoring capitalisation and a
+trailing full stop, and nothing else.
+
+Two things to know. Passing `--questions` to `evolve` (not just `init`) matters
+— it is how each generation's subprocess finds the file. And the simulated
+backend cannot pretend to be a model on questions it has never seen: with your
+own file it simply answers everything correctly and says so in the output. Use
+it to prove the file parses and the loop runs; use the real backend to score.
+
 ### The genes
 
 | Gene | What it does |
 |---|---|
-| `PROMPT_CLAUSES` | Indices into `CLAUSES`; assembled in order into the system prompt. Mutations add, drop, swap or reorder one clause — weighted toward adding while the prompt is short. |
+| `PROMPT_CLAUSES` | Indices into the clause pool — the built-in `CLAUSES`, or the `instruction:` lines of your file. Assembled in order into the system prompt. Mutations add, drop, swap or reorder one clause, weighted toward adding while the prompt is short. |
 | `llm_effort` | Index into `low … max`, passed as `output_config.effort`. Thinking is on by default on Opus 5; this is the depth dial. |
 | `llm_answer_tokens` | `max_tokens` for the reply. |
 | `llm_reask_limit` | How many times to re-ask when a reply comes back unusable, with the formatting demand moved to the end of the user turn. |
@@ -270,12 +339,13 @@ grader out of the model's reach, as `llm` does.
 $ cd agent && python3 -m unittest discover -s tests -t .
 ```
 
-66 tests, standard library only, and **no test calls the API** — the suite
+83 tests, standard library only, and **no test calls the API** — the suite
 forces the simulated backend in `tests/__init__.py`. They cover the
 containment rules (escape via `..`, via symlink, via a forged marker outside
 the workspace, and deletion of the root itself are each refused), the genome
 rewrite including the prompt gene, mutation bounds and seed stability, task
-determinism, the reply cache and call budget, abstention deleting nothing, and
+determinism, the reply cache and call budget, abstention deleting nothing,
+every rejection the question-file parser can raise, and
 the full lifecycle end to end with real subprocesses and real deletions —
 upgrade, rejection, self-destruction, rollback to parent, extinction, and a
 head too broken to run.
@@ -292,6 +362,7 @@ agent/
     mutate.py        seeded hill-climbing with plateau pressure
     tasks.py         the pathfinding suite, plus tasks that always fail or pass
     llm_task.py      the Claude task whose system prompt is part of the genome
+    promptpack.py    reads the plain-text question file `new` and `check` write
     llm.py           the API backend, reply cache, call budget and offline stand-in
     errors.py        TaskUnavailable: could not be judged, so nothing is deleted
     orchestrator.py  seeding, running the head, evolving, status
