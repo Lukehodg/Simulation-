@@ -31,7 +31,8 @@ from .secrets import get_secret
 #: job -> (launchd label, trailing CLI args, log filename, default times)
 JOBS: dict[str, tuple[str, tuple[str, ...], str, tuple[str, ...]]] = {
     "sync": ("com.health.sync", ("sync",), "sync.log", ("07:15", "19:15")),
-    "brief": ("com.health.brief", ("brief", "--save"), "brief.log", ("07:45",)),
+    "brief": ("com.health.brief", ("brief", "--save", "--html"), "brief.log",
+              ("07:45",)),
 }
 
 

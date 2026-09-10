@@ -179,18 +179,56 @@ _ADVICE = {
 
 
 @dataclass
+class Signal:
+    """One recovery metric on the day, judged against its baseline."""
+    metric: str
+    label: str
+    value: float
+    z: float | None = None
+    against: str | None = None       # "same-phase" | "28-day"
+    adverse: float | None = None     # z in the bad direction; positive = worse
+    n: int = 0
+
+    @property
+    def verdict(self) -> str:
+        if self.adverse is None:
+            return "unclear"
+        if self.adverse >= ADVERSE_Z:
+            return "adverse"
+        if self.adverse >= CLEAN_Z:
+            return "mildly adverse"
+        if self.adverse <= -CLEAN_Z:
+            return "favourable"
+        return "ordinary"
+
+    def reason(self) -> str:
+        return (f"{self.label} {self.value:.4g}, {self.z:+.1f} SD vs your "
+                f"{self.against} baseline — {self.verdict}")
+
+    def as_dict(self) -> dict:
+        return {"metric": self.metric, "label": self.label, "value": self.value,
+                "z": self.z, "baseline": self.against, "n": self.n,
+                "verdict": self.verdict}
+
+
+@dataclass
 class Readiness:
     day: date
     recommendation: str
+    signals: list[Signal] = field(default_factory=list)
     reasons: list[str] = field(default_factory=list)
     caveats: list[str] = field(default_factory=list)
     phase_context: str | None = None
+    load_ratio: float | None = None
+    load_summary: str | None = None
+    sleep_debt_hours: float | None = None
 
     def as_dict(self) -> dict:
         return {
             "date": str(self.day),
             "recommendation": self.recommendation,
             "advice": _ADVICE[self.recommendation],
+            "vitals": [s.as_dict() for s in self.signals],
             "reasons": self.reasons,
             "caveats": self.caveats,
             "phase_context": self.phase_context,
@@ -200,38 +238,33 @@ class Readiness:
 
 def _recovery_signal(store: Store, metric: str, label: str, bad: int,
                      day: date, cycle_known: bool):
-    """(adverse_magnitude, reason, caveat) for one recovery metric on `day`.
-
-    adverse_magnitude is in robust-SD units, positive when the reading sits in
-    the direction that argues against training hard.
-    """
+    """(Signal, caveat) for one recovery metric on `day`. Either may be None."""
     row = store.query(
         "SELECT value FROM daily_metrics WHERE metric = ? AND local_date = ?",
         [metric, day])
     if not row or row[0][0] is None:
-        return None, None, f"no {label} for {day}"
+        return None, f"no {label} for {day}"
     value = row[0][0]
 
     z = None
-    same_phase = False
+    against = "28-day"
+    n = 0
     if cycle_known:
         reading = cycle_features.phase_adjusted(store, metric, day)
         if reading.phase_z is not None:
-            z, same_phase = reading.phase_z, True
+            z, against, n = reading.phase_z, "same-phase", reading.phase_n
         elif reading.overall_z is not None:
-            z = reading.overall_z
+            z, n = reading.overall_z, reading.overall_n
     if z is None:
         base = daily.baseline(store, metric, as_of=day)
         if not base.usable:
-            return None, None, (f"{label} {value:.4g} — {base.note or 'no baseline yet'}")
-        z = base.z(value)
+            return None, f"{label} {value:.4g} — {base.note or 'no baseline yet'}"
+        z, n = base.z(value), base.n
     if z is None:
-        return None, None, f"{label} {value:.4g} — no baseline yet"
+        return None, f"{label} {value:.4g} — no baseline yet"
 
-    adverse = z * bad
-    against = "same-phase" if same_phase else "28-day"
-    reason = f"{label} {value:.4g}, {z:+.1f} SD vs your {against} baseline"
-    return adverse, reason, None
+    return Signal(metric=metric, label=label, value=value, z=z, against=against,
+                  adverse=z * bad, n=n), None
 
 
 def readiness(store: Store, day: date | None = None) -> Readiness:
@@ -239,26 +272,23 @@ def readiness(store: Store, day: date | None = None) -> Readiness:
     day = day or date.today()
     cycle_known = bool(cycle_features.summary(store, today=day).get("cycles"))
 
-    adverse_mags: list[float] = []
+    signals: list[Signal] = []
     reasons: list[str] = []
     caveats: list[str] = []
-    hrv_adverse = None
 
     for metric, label, bad in _RECOVERY_SIGNALS:
-        mag, reason, caveat = _recovery_signal(store, metric, label, bad, day,
-                                               cycle_known)
+        signal, caveat = _recovery_signal(store, metric, label, bad, day,
+                                          cycle_known)
         if caveat:
             caveats.append(caveat)
-        if mag is None:
+        if signal is None:
             continue
-        adverse_mags.append(mag)
-        if metric == M.HRV_RMSSD:
-            hrv_adverse = mag
-        if mag >= CLEAN_Z or mag <= -CLEAN_Z:
-            reasons.append(reason + (
-                " — adverse" if mag >= ADVERSE_Z else
-                " — mildly adverse" if mag >= CLEAN_Z else " — favourable"))
+        signals.append(signal)
+        if signal.verdict != "ordinary":
+            reasons.append(signal.reason())
 
+    adverse_mags = [s.adverse for s in signals if s.adverse is not None]
+    hrv_adverse = next((s.adverse for s in signals if s.metric == M.HRV_RMSSD), None)
     adverse_signals = sum(1 for m in adverse_mags if m >= ADVERSE_Z)
 
     load = daily.training_load(store, as_of=day)
@@ -286,8 +316,10 @@ def readiness(store: Store, day: date | None = None) -> Readiness:
     else:
         rec = PROCEED
 
-    result = Readiness(day=day, recommendation=rec, reasons=reasons,
-                       caveats=caveats)
+    result = Readiness(day=day, recommendation=rec, signals=signals,
+                       reasons=reasons, caveats=caveats,
+                       load_ratio=load.ratio, load_summary=load.describe(),
+                       sleep_debt_hours=debt.debt_hours)
 
     if cycle_known and hrv_adverse is not None and hrv_adverse >= CLEAN_Z:
         reading = cycle_features.phase_adjusted(store, M.HRV_RMSSD, day)

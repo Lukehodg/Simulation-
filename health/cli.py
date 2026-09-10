@@ -346,12 +346,23 @@ def cmd_brief(args, config) -> int:
         return 0
 
     print(result.text)
+    directory = config.data_dir / "briefs"
+    stem = f"{date.today()}{'-week' if span == 'week' else ''}"
     if args.save:
-        directory = config.data_dir / "briefs"
         directory.mkdir(parents=True, exist_ok=True)
-        path = directory / f"{date.today()}{'-week' if span == 'week' else ''}.md"
+        path = directory / f"{stem}.md"
         path.write_text(f"# {span} brief · {date.today()}\n\n{result.text}\n")
         print(f"\nsaved to {path}", file=sys.stderr)
+    if args.html:
+        from .briefpage import render as render_html
+
+        directory.mkdir(parents=True, exist_ok=True)
+        page = directory / f"{stem}.html"
+        page.write_text(render_html(result))
+        print(f"\npage at {page}", file=sys.stderr)
+        if sys.platform == "darwin" and sys.stdout.isatty():
+            import subprocess
+            subprocess.run(["open", str(page)], check=False)
     if args.notify and config.notify_imessage and result.usage:
         from .notify import NotifyError, send_imessage
 
@@ -687,7 +698,9 @@ def build_parser() -> argparse.ArgumentParser:
     brief_cmd.add_argument("--no-send", action="store_true",
                            help="print exactly what would be sent, and stop")
     brief_cmd.add_argument("--save", action="store_true",
-                           help="also write it to data/briefs/")
+                           help="also write it to data/briefs/ as markdown")
+    brief_cmd.add_argument("--html", action="store_true",
+                           help="also render a page to data/briefs/ and open it")
     brief_cmd.add_argument("--notify", action="store_true",
                            help="also text it to yourself over iMessage "
                                 "(needs HEALTH_NOTIFY_IMESSAGE)")
