@@ -86,6 +86,18 @@ with them:
   prescribing, and the difference is the sentence "trials used X" versus "take
   X". Never suggest supplementing an analyte that is inside its range.
 
+- COMPOUNDS. If a `protocol` block is present, they are on the compounds it
+  lists. Use it to read the results: a result that has moved the way one of
+  those compounds is documented to move it (low HDL, suppressed LH/FSH, a
+  higher haematocrit on testosterone; lower HbA1c and triglycerides on a GLP-1
+  agonist) is expected — say so, and still flag it where it is outside range.
+  A result moving the *opposite* way to a compound's documented effect is the
+  one to look at hardest. The `pre_panel` list is what a follow-up panel should
+  add. Do not comment on the protocol itself — not the dose, not ancillary
+  drugs, not PCT, not whether to run it. A rising haematocrit, a poor lipid
+  picture, or a very low oestradiol on an aromatase inhibitor goes under "worth
+  asking your doctor", not into advice you give.
+
 - NO SCORE. Do not invent an overall health score, grade, or percentage, and
   do not rank the indicators against one another. They are deliberately not
   combined: weighting a liver enzyme against a heart-rate variability reading
@@ -162,6 +174,7 @@ def redacted_payload(store: Store, panel_date: date | None = None,
     }
     if with_context and values:
         from .features import indicators as indicator_features
+        from .features import protocol as protocol_features
         from .features import training as training_features
 
         drawn = values[0].local_date
@@ -171,6 +184,11 @@ def redacted_payload(store: Store, panel_date: date | None = None,
             payload["change_since_last_panel"] = changes
         payload["training"] = training_features.observations(store)
         payload["indicators"] = indicator_features.all_indicators(store)
+        protocol = protocol_features.summary(store, today=drawn)
+        if protocol.get("on"):
+            payload["protocol"] = protocol
+            payload["pre_panel_for_next_time"] = protocol_features.pre_panel_checklist(
+                store, drawn)
     return payload
 
 

@@ -131,6 +131,15 @@ def history(store: Store, analyte: str) -> list[LabValue]:
     ))
 
 
+def _compound_starts_between(store: Store, first: date, last: date) -> list[str]:
+    """Compounds whose start falls inside a date span — so a trend across that
+    span is comparing before-and-on, not like for like."""
+    return [r[0] for r in store.query(
+        "SELECT DISTINCT compound FROM protocol_events "
+        "WHERE event = 'start' AND local_date > ? AND local_date <= ?",
+        [first, last])]
+
+
 def trend(store: Store, analyte: str) -> Trend:
     values = history(store, analyte)
     spec = A.ANALYTES.get(analyte)
@@ -146,6 +155,18 @@ def trend(store: Store, analyte: str) -> Trend:
             result.note = (
                 f"{result.label} moves with the cycle and these draws span "
                 f"{named}; compare draws from the same phase, not this series"
+            )
+
+    if spec and spec.compound_sensitive and len(result.points) > 1:
+        started = _compound_starts_between(store, result.points[0][0],
+                                           result.points[-1][0])
+        if started:
+            result.comparable = False
+            names = ", ".join(sorted(started))
+            result.note = (
+                f"{result.label} is moved by {names}, which started partway "
+                f"through this series — the change across that point is the "
+                f"compound plus everything else, not a like-for-like trend"
             )
     return result
 
@@ -199,6 +220,14 @@ def panel_context(store: Store, panel_date: date, windows: tuple[int, ...] = (14
     if load and load[0][0]:
         out["28d_before"]["strength_sessions"] = {"median": load[0][0], "days": 28}
         out["28d_before"]["strength_tonnage_kg"] = {"median": round(load[0][1]), "days": 28}
+
+    on = store.query(
+        "SELECT compound, weekly_dose, unit, weeks_on FROM protocol_days "
+        "WHERE local_date = ? ORDER BY compound", [panel_date])
+    if on:
+        out["on_at_draw"] = [
+            {"compound": c, "weekly_dose": d, "unit": u, "weeks_on": round(w, 1)}
+            for c, d, u, w in on]
     return out
 
 

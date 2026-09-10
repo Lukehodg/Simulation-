@@ -12,6 +12,7 @@ from .apple_health import AppleHealthSource
 from .base import Source
 from .hevy import HevySource
 from .labs import LabsSource
+from .protocol import ProtocolSource
 from .whoop import WhoopSource
 
 SOURCES: dict[str, type[Source]] = {
@@ -19,7 +20,8 @@ SOURCES: dict[str, type[Source]] = {
     "hevy": HevySource,
     "apple_health": AppleHealthSource,
     "labs": LabsSource,
+    "protocol": ProtocolSource,
 }
 
 __all__ = ["SOURCES", "Source", "WhoopSource", "HevySource", "AppleHealthSource",
-           "LabsSource"]
+           "LabsSource", "ProtocolSource"]

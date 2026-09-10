@@ -66,6 +66,14 @@ align-items:center;padding:8px 0;border-bottom:1px solid var(--hair)}
 .sleep .line .mono{font-size:13px}
 .debtbar{height:14px;background:var(--hair);border-radius:2px;position:relative;margin-top:4px}
 .debtbar .fill{position:absolute;left:0;top:0;bottom:0;background:var(--warn);border-radius:2px}
+.banner{font-family:"JetBrains Mono",monospace;font-size:12px;color:var(--soft);
+padding:10px 0;border-bottom:1px solid var(--rule)}
+.banner .tag{border:1px solid var(--soft);padding:1px 5px;margin-right:8px;
+font-size:10px;letter-spacing:.1em;text-transform:uppercase}
+.alert{border-left:3px solid var(--warn);background:var(--hair);padding:10px 14px;
+margin:14px 0;font-size:14px}
+.vital .arrow{font-family:"JetBrains Mono",monospace;font-size:11px}
+.vital .arrow.bad{color:var(--bad)}.vital .arrow.good{color:var(--good)}
 .prose{padding-top:6px}
 .prose p{font-size:15.5px;line-height:1.68;margin:0 0 14px;max-width:64ch}
 .prose p:last-child{margin-bottom:0}
@@ -123,19 +131,48 @@ def _dev_bar(z: float | None, tone: str) -> str:
             f'<span class="fill {tone}" style="left:{left:.1f}%;width:{half:.1f}%"></span></div>')
 
 
-def _vitals(readiness: dict) -> str:
+def _vitals(readiness: dict, trends: list[dict] | None = None) -> str:
+    drift = {t["metric"]: t for t in (trends or [])}
     rows = []
     for v in readiness.get("vitals", []):
         z = v.get("z")
         tone = _tone(z, _BAD_WHEN_NEGATIVE.get(v["metric"], True))
-        zcls = tone
         zlabel = "—" if z is None else f"{z:+.1f} SD"
+        t = drift.get(v["metric"])
+        arrow = ""
+        if t:
+            up = t["verdict"] == "rising"
+            bad = up != (not _BAD_WHEN_NEGATIVE.get(v["metric"], True))
+            arrow = (f'<span class="arrow {"bad" if bad else "good"}">'
+                     f'{"↑" if up else "↓"} 6wk</span>')
         rows.append(
-            f'<div class="vital"><span class="k">{_esc(v["label"])}</span>'
+            f'<div class="vital"><span class="k">{_esc(v["label"])} {arrow}</span>'
             f'<span class="val">{_esc(_num(v["value"]))}</span>'
             f'{_dev_bar(z, tone)}'
-            f'<span class="z {zcls}">{_esc(zlabel)} · n{v.get("n", 0)}</span></div>')
+            f'<span class="z {tone}">{_esc(zlabel)} · n{v.get("n", 0)}</span></div>')
     return "\n".join(rows)
+
+
+def _dose(active: dict) -> str:
+    if active.get("weekly_dose") is None:
+        return ""
+    return f'{active["weekly_dose"]:g}{active.get("unit") or ""}/wk'
+
+
+def _architecture(arch: dict) -> str:
+    comps = arch.get("components")
+    if not comps:
+        return ""
+    cells = "".join(
+        f'<div class="spark"><span class="k">{_esc(c["label"])}</span>'
+        f'<span></span>'
+        f'<span class="now">{_esc(_num(c["last_night"]))}'
+        + (f' ({c["z"]:+.1f})' if c.get("z") is not None else "") + '</span></div>'
+        for c in comps if c.get("last_night") is not None)
+    debt = arch.get("deep_sleep_debt_min")
+    tail = (f'<p class="list" style="border:none;padding-top:8px">deep-sleep debt '
+            f'{debt:+.0f} min over the window</p>' if debt else "")
+    return f'<div style="margin-top:14px">{cells}{tail}</div>'
 
 
 def _num(value: Any) -> str:
@@ -241,6 +278,17 @@ def render(brief: Brief) -> str:
         f'<div class="meta">{_esc(p.get("week") or p.get("date", date.today()))}<br>'
         f'computed on this machine</div></div>')
 
+    on = readiness.get("on") or (p.get("protocol") or {}).get("on") or []
+    if on:
+        pills = " · ".join(
+            f'{_esc(a["label"])} {_esc(_dose(a))} · wk {a.get("weeks_on", 0):g}'
+            for a in on)
+        parts.append(f'<div class="banner"><span class="tag">on</span> {pills}</div>')
+
+    illness = p.get("illness_watch") or {}
+    if illness.get("flag") == "watch":
+        parts.append(f'<div class="alert">⚠ {_esc(illness.get("note", ""))}</div>')
+
     if rec:
         parts.append(
             f'<div class="verdict"><span class="call {_REC_CLASS.get(rec,"ink")}">'
@@ -248,13 +296,34 @@ def render(brief: Brief) -> str:
             f'<p>{_esc(readiness.get("advice",""))}</p></div>')
 
     if readiness.get("vitals"):
-        parts.append(f'<section><h3>Where the body is</h3>{_vitals(readiness)}</section>')
+        parts.append(f'<section><h3>Where the body is</h3>'
+                     f'{_vitals(readiness, p.get("six_week_trends", []))}</section>')
+
+    context = readiness.get("context", [])
+    if context:
+        items = "".join(f"<li>{_esc(c)}</li>" for c in context)
+        parts.append(f'<section><h3>Context</h3><ul class="list">{items}</ul></section>')
 
     if debt:
-        parts.append(f'<section><h3>Sleep</h3>{_sleep(debt)}</section>')
+        parts.append(f'<section><h3>Sleep</h3>{_sleep(debt)}'
+                     f'{_architecture(p.get("sleep_architecture", {}))}</section>')
 
     if brief.text:
         parts.append(f'<section><h3>The read</h3><div class="prose">{_prose(brief.text)}</div></section>')
+
+    trends = p.get("six_week_trends", [])
+    if trends:
+        items = "".join(f'<li>{_esc(t["summary"])}</li>' for t in trends)
+        parts.append(f'<section><h3>Six-week drift</h3><ul class="list">{items}</ul></section>')
+
+    monitoring = [m for m in (p.get("protocol") or {}).get("monitoring", [])
+                  if m.get("current_trend")]
+    if monitoring:
+        items = "".join(
+            f'<li>{_esc(m["marker"])} — {_esc(m["current_trend"])} · '
+            f'{_esc(m["why"])}</li>' for m in monitoring)
+        parts.append(f'<section><h3>For a clinician to watch</h3>'
+                     f'<ul class="list">{items}</ul></section>')
 
     if weekly:
         series = p.get("daily_series", {})

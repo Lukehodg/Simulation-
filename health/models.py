@@ -145,6 +145,18 @@ class CycleEvent(_Base):
     value: float | None = None
 
 
+class ProtocolEvent(_Base):
+    source: str
+    local_date: date
+    event: str                 # start | change | stop
+    compound: str
+    dose: float | None = None
+    unit: str | None = None
+    freq: str | None = None     # weekly | e3d | eod | daily
+    route: str | None = None
+    note: str | None = None
+
+
 @dataclass
 class Records:
     """Whatever one raw payload turned out to contain."""
@@ -157,6 +169,7 @@ class Records:
     nutrition_days: list[NutritionDay] = field(default_factory=list)
     nutrition_items: list[NutritionItem] = field(default_factory=list)
     cycle_events: list[CycleEvent] = field(default_factory=list)
+    protocol_events: list[ProtocolEvent] = field(default_factory=list)
     lab_results: list[LabResult] = field(default_factory=list)
     #: Workouts the source says were deleted upstream. Parsers report them;
     #: the store applies them, so that a session you deleted in the app on

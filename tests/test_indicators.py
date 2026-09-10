@@ -177,3 +177,31 @@ def test_the_prompt_separates_reporting_evidence_from_prescribing(store):
     assert "Do not tell them what to take, or at what dose" in SYSTEM
     assert "trials used X" in SYSTEM
     assert "Do not invent an overall health score" in SYSTEM
+
+
+def test_the_prompt_reports_compound_effects_but_never_advises_on_the_protocol(store):
+    assert "COMPOUNDS." in SYSTEM
+    assert "not the dose, not ancillary" in SYSTEM
+    assert "not whether to run it" in SYSTEM
+
+
+def test_the_payload_carries_the_protocol_and_a_pre_panel_list(store):
+    from datetime import date as _date
+
+    from health.features import protocol as protocol_features
+    from health.models import LabResult, ProtocolEvent
+
+    drawn = _date(2026, 8, 1)
+    store.load(Records(
+        protocol_events=[ProtocolEvent(source="protocol", local_date=_date(2026, 7, 1),
+                                       event="start", compound="testosterone",
+                                       dose=200, unit="mg", freq="weekly")],
+        lab_results=[LabResult(source="labs", panel_id="p", analyte="hdl",
+                               local_date=drawn, value=1.1, unit="mmol/L",
+                               ref_low=1.2, ref_source="lab", flag="low",
+                               converted=True)]))
+    protocol_features.rebuild(store)
+
+    payload = redacted_payload(store)
+    assert payload["protocol"]["on"][0]["compound"] == "testosterone"
+    assert payload["pre_panel_for_next_time"]

@@ -134,8 +134,10 @@ def sync_all(store: Store, config: Config, names: list[str] | None = None,
 def rebuild_derived(store: Store) -> None:
     """Recompute the derived tables that sit on top of the loaded data."""
     from .features import cycle as cycle_features
+    from .features import protocol as protocol_features
 
     cycle_features.rebuild(store)
+    protocol_features.rebuild(store)
 
 
 def replay(store: Store, config: Config, name: str | None = None) -> list[SyncReport]:

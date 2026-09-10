@@ -70,4 +70,7 @@ def test_the_system_prompt_holds_the_house_rules():
     assert "ASSOCIATIONS ARE HYPOTHESES" in brief.SYSTEM
     assert "RED-S" in brief.SYSTEM
     assert "two short paragraphs" in brief.SYSTEM
-    assert "figure you cite must come from this payload" in brief.SYSTEM
+    assert "figure you cite must come from this" in brief.SYSTEM
+    # the compound guardrail
+    assert "not ancillary drugs, not PCT" in brief.SYSTEM
+    assert "Reporting a documented effect is not advising on the compound" in brief.SYSTEM

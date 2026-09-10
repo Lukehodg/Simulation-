@@ -26,9 +26,11 @@ Built and tested:
 | **Blood tests** | Panel import with unit conversion, reference-range flagging, phase-annotated trends |
 | **Research** | Europe PMC search returning study design, citations and DOIs |
 | **Daily features** | Robust baselines, deviations, training load, sleep regularity, autocorrelation-corrected correlations |
-| **Readiness & drivers** | A readiness-to-train call, personal sleep debt, what actually moves your recovery, strength vs. recovery, a phase-aware month |
+| **Readiness & drivers** | A readiness-to-train call, personal sleep debt, what actually moves your recovery (confounder-aware), strength vs. recovery, a phase-aware month |
+| **Drift & sleep** | Six-week trend detection (is the baseline itself moving), sleep architecture vs. your own baseline, an illness early-warning from resting HR + respiration + skin temp |
+| **Protocol** | Compounds you're on as an axis of interpretation — documented effects, monitoring markers, pre-panel checklist; escalation, never dosing |
 | **Brief** | `health brief` — the day (or the week) read back to you in two paragraphs, on a schedule if you want it |
-| **Agent tools** | 24 MCP tools — the surface Claude actually talks to |
+| **Agent tools** | 29 MCP tools — the surface Claude actually talks to |
 | **Interface** | A local page on 127.0.0.1, served from the same database |
 | **Bloods page** | Drop a report in, see what is flagged, ask Claude to read it |
 | **Indicators** | Per-domain status with the evidence behind each — deliberately no single score |
@@ -195,6 +197,38 @@ estimated — a phase baseline needs five same-phase days, a first cycle with no
 completed cycle behind it is left unplaced rather than guessed at, and gaps too
 long to be real cycles are reported as probable unlogged periods instead of
 being averaged into your median.
+
+## Protocol
+
+If you are on something — testosterone, a GLP-1 agonist, an aromatase inhibitor
+— the system reads your numbers differently once it knows. Log it:
+
+```sh
+health protocol add testosterone --dose 200 --unit mg --freq weekly --from 2026-09-08
+health protocol add retatrutide  --dose 2   --unit mg --freq weekly --from 2026-09-08
+health protocol                          # what's active, weeks on, what to watch
+health protocol stop retatrutide --on 2026-12-01
+```
+
+`compounds.py` is a small curated vocabulary — the same idea as `analytes.py` —
+holding each compound's *documented* effects on the metrics and bloods this
+system tracks, and the markers a clinician should watch. From that:
+
+- **Context.** A resting heart rate that is up a few bpm on a GLP-1 agonist is
+  read as expected rather than alarming; the elevation is adjusted for before
+  the illness-watch judges it. A metric moving the *opposite* way to what a
+  compound predicts is flagged as the informative case.
+- **Strength.** Every strength trend is caveated as compound-plus-training, and
+  a stall on testosterone is called out as meaning more than it would otherwise.
+- **Bloods.** A low HDL or a suppressed LH on testosterone is annotated as
+  expected and still flagged; a trend spanning the start of a compound is
+  refused as not like-for-like; and the next panel gets a checklist of what to
+  include (a full blood count and lipids on testosterone, HbA1c and
+  triglycerides on a GLP-1).
+- **Escalation, not management.** A rising haematocrit, a poor lipid picture, a
+  climbing resting HR — these go to "worth a doctor's review". The system holds
+  a hard line: it reports documented effects and never comments on the dose,
+  ancillary drugs, or PCT.
 
 ## Blood tests
 
@@ -491,7 +525,7 @@ the agent:
 claude mcp add health -- /path/to/.venv/bin/health mcp --root /path/to/project
 ```
 
-That exposes 24 tools — baselines, deviations, correlations, training load,
+That exposes 29 tools — baselines, deviations, correlations, training load,
 lift progression, cycle phase, blood results, literature search, the readiness
 call and its cross-domain siblings, and a daily brief that pulls them together.
 Then you can just ask:

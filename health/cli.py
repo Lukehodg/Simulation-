@@ -12,6 +12,7 @@
     health brief [--week]       what the numbers mean today, and what to do
     health research "question"  search the literature, with citations
     health cycle [--metric M]   where you are, and how a metric moves by phase
+    health protocol [add ...]   what you're on, as context for the analysis
     health lifts [EXERCISE]     strength progression, or one exercise's history
     health volume [--weeks N]   weekly tonnage by muscle group
     health sql "SELECT ..."     ask the database directly
@@ -110,6 +111,67 @@ def cmd_ingest(args, config) -> int:
     with _store(config) as store:
         print(ingest_path(store, config, path, name=args.source).summary())
     return 0
+
+
+def cmd_protocol(args, config) -> int:
+    from . import compounds as compounds_kb
+    from .features import protocol as protocol_features
+
+    if args.action in ("add", "change", "stop"):
+        config.ensure_dirs()
+        source = build_source("protocol", config)
+        event = {
+            "event": "start" if args.action == "add" else args.action,
+            "compound": args.compound,
+            "date": args.date or args.since,
+            "dose": args.dose, "unit": args.unit, "freq": args.freq,
+            "route": args.route, "note": args.note,
+        }
+        try:
+            landed = source.add(event)
+        except ValueError as exc:
+            raise SystemExit(str(exc))
+        with _store(config) as store:
+            store.load(source.parse(landed))
+            store.record_raw(landed, "protocol", "event",
+                             datetime.now(timezone.utc), parsed=True)
+            protocol_features.rebuild(store)
+            summary = protocol_features.summary(store)
+        key = compounds_kb.canonical(args.compound)
+        print(f"{args.action}: {key} on {event['date']}")
+        _print_protocol(summary)
+        return 0
+
+    with _store(config, read_only=True) as store:
+        summary = protocol_features.summary(store)
+    _print_protocol(summary)
+    return 0
+
+
+def _print_protocol(summary: dict) -> None:
+    if not summary.get("on"):
+        print(summary.get("note", "nothing logged"))
+        return
+    print(f"{'compound':<26}{'dose':>14}{'weeks':>8}  status")
+    print("-" * 62)
+    for entry in summary["on"]:
+        dose = (f"{entry['weekly_dose']:g} {entry['unit'] or ''}/wk"
+                if entry["weekly_dose"] is not None else "—")
+        status = "settled" if entry["settled"] else "still building"
+        print(f"{entry['label'][:25]:<26}{dose:>14}{entry['weeks_on']:>8.1f}  {status}")
+    if summary.get("strength_note"):
+        print(f"\nstrength: {summary['strength_note']}")
+    if summary.get("monitoring"):
+        print("\nfor a clinician to watch:")
+        for m in summary["monitoring"]:
+            line = f"  {m['marker']} — {m['why']}"
+            if m.get("current_trend"):
+                line += f"\n    now: {m['current_trend']}"
+            print(line)
+    if summary.get("pre_panel"):
+        print("\nnext blood panel should include: "
+              + ", ".join(summary["pre_panel"]))
+    print(f"\n{summary['boundary']}")
 
 
 def cmd_replay(args, config) -> int:
@@ -707,6 +769,24 @@ def build_parser() -> argparse.ArgumentParser:
     brief_cmd.add_argument("--json", action="store_true",
                            help="machine-readable output")
     brief_cmd.set_defaults(fn=cmd_brief)
+
+    protocol_cmd = sub.add_parser("protocol", help="what you're on, as context "
+                                                   "for the analysis")
+    protocol_cmd.add_argument("action", nargs="?", default="show",
+                              choices=["show", "add", "change", "stop"])
+    protocol_cmd.add_argument("compound", nargs="?",
+                              help="e.g. testosterone, retatrutide")
+    protocol_cmd.add_argument("--dose", type=float, help="per administration")
+    protocol_cmd.add_argument("--unit", default="mg", help="mg | iu | ml")
+    protocol_cmd.add_argument("--freq", default="weekly",
+                              help="weekly | e3d | eod | daily")
+    protocol_cmd.add_argument("--route", help="im | subq | oral")
+    protocol_cmd.add_argument("--from", dest="since", metavar="YYYY-MM-DD",
+                              help="start date (for add)")
+    protocol_cmd.add_argument("--on", dest="date", metavar="YYYY-MM-DD",
+                              help="date of a change or stop")
+    protocol_cmd.add_argument("--note")
+    protocol_cmd.set_defaults(fn=cmd_protocol)
 
     research = sub.add_parser("research", help="search the literature")
     research.add_argument("query", nargs="?", help="what to search for")

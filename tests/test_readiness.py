@@ -4,9 +4,10 @@ from datetime import date, datetime, time, timedelta, timezone
 
 import pytest
 
+from health.features import protocol as protocol_features
 from health.features import readiness
-from health.models import (CycleEvent, ExerciseTemplate, Observation, Records,
-                            StrengthSet)
+from health.models import (CycleEvent, ExerciseTemplate, Observation,
+                            ProtocolEvent, Records, StrengthSet)
 
 START = date(2026, 5, 1)
 
@@ -207,3 +208,54 @@ def test_phase_plan_puts_the_heavy_window_in_the_follicular_phase(store):
     assert plan["available"] is True
     assert plan["windows"][0]["phase"] == "follicular"
     assert "heavy" in plan["windows"][0]["emphasis"]
+
+
+# -- illness watch & compound context ------------------------------------
+
+def _protocol(store, compound: str, on: date, dose: float = 2.0):
+    store.load(Records(protocol_events=[ProtocolEvent(
+        source="protocol", local_date=on, event="start", compound=compound,
+        dose=dose, unit="mg", freq="weekly")]))
+    protocol_features.rebuild(store)
+
+
+def test_illness_watch_fires_when_the_trio_rises_together(store):
+    day = START + timedelta(days=29)
+    # 18 calm days, then a 12-day coordinated climb in all three.
+    ramp = [0.0] * 18 + [i * 0.5 for i in range(1, 13)]
+    _obs(store, "resting_hr", [52 + r for r in ramp])
+    _obs(store, "respiratory_rate", [14 + 0.5 * r for r in ramp])
+    _obs(store, "skin_temp_deviation", [0.0 + 0.4 * r for r in ramp])
+
+    watch = readiness.illness_watch(store, as_of=day)
+    assert watch["flag"] == "watch"
+    assert "ahead of an illness" in watch["note"]
+
+
+def test_illness_watch_subtracts_the_glp1_resting_hr_offset(store):
+    day = START + timedelta(days=29)
+    for i in range(30):
+        _obs(store, "resting_hr", [52.0], start=START + timedelta(days=i))
+    # today: resting HR up 4 bpm — but that is the retatrutide offset
+    _obs(store, "resting_hr", [56.0], start=day)
+    _protocol(store, "retatrutide", START)
+
+    watch = readiness.illness_watch(store, as_of=day)
+    rhr = next(s for s in watch["signals"] if s["metric"] == "resting_hr")
+    assert rhr["compound_adjusted"] is True
+    assert watch["compound_adjustment_bpm"] > 0
+    # adjusted z is small, so no flag on resting HR alone
+    assert watch["flag"] == "clear"
+
+
+def test_readiness_context_notes_a_compound_explained_move(store):
+    _clean_day(store, days=32)
+    _obs(store, "resting_hr", [64.0], start=START + timedelta(days=32))   # well up
+    _obs(store, "hrv_rmssd", [70.0], start=START + timedelta(days=32))
+    _obs(store, "recovery_score", [80.0], start=START + timedelta(days=32))
+    _obs(store, "sleep_duration", [470.0], start=START + timedelta(days=32))
+    _protocol(store, "retatrutide", START)
+
+    result = readiness.readiness(store, START + timedelta(days=32))
+    assert any("retatrutide" in c and "expected" in c for c in result.context)
+    assert result.as_dict()["on"]

@@ -28,8 +28,11 @@ from .analytes import ANALYTES, canonical_analyte
 from .config import Config, load_config
 from .features import cycle as cycle_features
 from .features import daily, labs as lab_features
+from .features import protocol as protocol_features
 from .features import readiness as readiness_features
+from .features import sleep as sleep_features
 from .features import strength as strength_features
+from .features import trend as trend_features
 from .research import evidence_query, search
 from .store import Store
 
@@ -50,6 +53,11 @@ How to use them well:
   recommendation and the reasons; do not turn it into a number or a percentage.
   Training advice may be concrete — rep ranges, a load cap, train or skip —
   when it is tied to a specific figure it returned.
+- If `protocol` returns compounds, use them as context: a metric that moved the
+  way a compound is documented to move it is expected; one moving the opposite
+  way is the informative case. Escalate a trending monitoring marker to "worth a
+  doctor". Never comment on the dose, ancillary drugs, or PCT — reporting a
+  documented effect is not advising on the protocol.
 - Never compare HRV across devices. WHOOP reports RMSSD, Apple reports SDNN,
   and they are stored under different metric names for that reason.
 - For anyone with a menstrual cycle, judge a reading with
@@ -406,6 +414,57 @@ def phase_training_plan(weeks: int = 4) -> dict[str, Any]:
         return readiness_features.phase_training_plan(store, weeks=weeks)
 
 
+@server.tool(description="What the person is on (compounds / peptides), what each "
+                         "is documented to do to their metrics and bloods, the "
+                         "monitoring markers a clinician should watch, and what a "
+                         "next blood panel should include. Reports documented "
+                         "effects only — never dosing, ancillary or PCT advice.")
+@guarded
+def protocol(day: str | None = None) -> dict[str, Any]:
+    with _store() as store:
+        return protocol_features.summary(store, today=_day(day))
+
+
+@server.tool(description="Is a metric's baseline itself trending over the last "
+                         "six weeks — the slow slide a day-vs-baseline check "
+                         "cannot see. Robust slope plus a Mann-Kendall test with "
+                         "the sample size corrected for autocorrelation.")
+@guarded
+def metric_trend(metric: str, days: int = 42) -> dict[str, Any]:
+    with _store() as store:
+        return trend_features.metric_trend(store, metric, days=days).as_dict()
+
+
+@server.tool(description="Last night's sleep architecture — deep, REM, and time "
+                         "awake after falling asleep — each against the person's "
+                         "own recent baseline, plus a running deep-sleep debt.")
+@guarded
+def sleep_quality(days: int = 28, as_of: str | None = None) -> dict[str, Any]:
+    with _store() as store:
+        return sleep_features.sleep_quality(store, as_of=_day(as_of), days=days)
+
+
+@server.tool(description="Whether resting HR, respiration and skin temperature "
+                         "are rising together — a pattern that often precedes "
+                         "illness by a day or two. Subtracts the resting-HR rise "
+                         "a GLP-1 agonist is expected to cause. A flag to rest "
+                         "and watch, never a diagnosis.")
+@guarded
+def illness_watch(as_of: str | None = None) -> dict[str, Any]:
+    with _store() as store:
+        return readiness_features.illness_watch(store, as_of=_day(as_of))
+
+
+@server.tool(description="One model of a recovery metric on all the candidate "
+                         "behaviours at once, so an effect can be told from its "
+                         "confounder. Standardised coefficients, R-squared, and a "
+                         "collinearity note. Observational and in-sample.")
+@guarded
+def drivers_model(target: str = "hrv_rmssd", days: int = 90) -> dict[str, Any]:
+    with _store() as store:
+        return readiness_features.drivers_model(store, target=target, days=days)
+
+
 @server.tool(description="A briefing for one day: what the body is saying, "
                          "against baselines and cycle phase where available.")
 @guarded
@@ -422,9 +481,16 @@ def daily_brief(day: str | None = None) -> dict[str, Any]:
                            for m, v, z in daily.deviations(store, target)],
             "readiness": readiness_features.readiness(store, target).as_dict(),
             "sleep_debt": readiness_features.sleep_debt(store, as_of=target).as_dict(),
+            "sleep_architecture": sleep_features.sleep_quality(store, as_of=target),
             "training_load": daily.training_load(store, as_of=target).describe(),
             "sleep_regularity": daily.sleep_regularity(store, as_of=target),
+            "six_week_trends": [t.as_dict()
+                                for t in trend_features.trends(store, as_of=target)],
+            "illness_watch": readiness_features.illness_watch(store, as_of=target),
         }
+        on = protocol_features.summary(store, today=target)
+        if on.get("on"):
+            brief["protocol"] = on
         cycle = cycle_features.summary(store, today=target)
         if cycle.get("cycles"):
             brief["cycle"] = {k: (str(v) if isinstance(v, date) else v)

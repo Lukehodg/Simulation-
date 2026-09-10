@@ -30,11 +30,14 @@ import statistics
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
+from .. import compounds as compounds_kb
 from .. import metrics as M
 from ..store import Store
 from . import cycle as cycle_features
 from . import daily
+from . import protocol as protocol_features
 from . import strength as strength_features
+from . import trend as trend_features
 
 #: A night this far short of need still only counts as this much debt — one
 #: long lie-in should not wipe out a week of deficit, and cannot bank credit.
@@ -218,7 +221,8 @@ class Readiness:
     signals: list[Signal] = field(default_factory=list)
     reasons: list[str] = field(default_factory=list)
     caveats: list[str] = field(default_factory=list)
-    phase_context: str | None = None
+    context: list[str] = field(default_factory=list)
+    protocol: list[dict] = field(default_factory=list)
     load_ratio: float | None = None
     load_summary: str | None = None
     sleep_debt_hours: float | None = None
@@ -231,7 +235,8 @@ class Readiness:
             "vitals": [s.as_dict() for s in self.signals],
             "reasons": self.reasons,
             "caveats": self.caveats,
-            "phase_context": self.phase_context,
+            "context": self.context,
+            "on": self.protocol,
             "no_score": NO_SCORE,
         }
 
@@ -316,23 +321,35 @@ def readiness(store: Store, day: date | None = None) -> Readiness:
     else:
         rec = PROCEED
 
-    result = Readiness(day=day, recommendation=rec, signals=signals,
-                       reasons=reasons, caveats=caveats,
-                       load_ratio=load.ratio, load_summary=load.describe(),
-                       sleep_debt_hours=debt.debt_hours)
+    context: list[str] = []
 
     if cycle_known and hrv_adverse is not None and hrv_adverse >= CLEAN_Z:
         reading = cycle_features.phase_adjusted(store, M.HRV_RMSSD, day)
         if reading.phase == cycle_features.LUTEAL:
-            result.phase_context = (
+            context.append(
                 "you are luteal, where HRV usually runs lower — some of this is "
                 "the cycle rather than fatigue"
                 + (", and against the same phase of your own cycles it is "
                    "ordinary" if reading.verdicts_disagree else ""))
         elif reading.phase in (cycle_features.FOLLICULAR, cycle_features.MENSES):
-            result.phase_context = (
+            context.append(
                 f"you are {reading.phase}, where HRV usually runs higher, so "
                 "this reading is not cycle-driven")
+
+    # What the compounds bear on each adverse reading, both ways.
+    for signal in signals:
+        if signal.verdict in ("ordinary", "favourable"):
+            continue
+        context.extend(protocol_features.context(store, signal.metric, day, signal.z))
+    strength_note = protocol_features.strength_note(store, day)
+    if strength_note:
+        context.append(strength_note)
+
+    result = Readiness(day=day, recommendation=rec, signals=signals,
+                       reasons=reasons, caveats=caveats, context=context,
+                       protocol=[a.as_dict() for a in protocol_features.active(store, day)],
+                       load_ratio=load.ratio, load_summary=load.describe(),
+                       sleep_debt_hours=debt.debt_hours)
     return result
 
 
@@ -366,14 +383,83 @@ def _last_workout_hour_series(store: Store, start: date,
     return {d: v for d, v in rows if v is not None}
 
 
+def _ols_residuals(y: list[float], xs: list[list[float]]) -> list[float] | None:
+    """Residuals of y regressed on the columns in xs (plus an intercept).
+
+    Normal equations, pure Python. Returns None if the system is singular —
+    which is what collinear controls produce, and a signal worth passing on
+    rather than papering over.
+    """
+    n = len(y)
+    design = [[1.0, *(col[i] for col in xs)] for i in range(n)]
+    k = len(design[0])
+    xtx = [[sum(design[r][a] * design[r][b] for r in range(n)) for b in range(k)]
+           for a in range(k)]
+    xty = [sum(design[r][a] * y[r] for r in range(n)) for a in range(k)]
+
+    # Gaussian elimination with partial pivoting.
+    for col in range(k):
+        pivot = max(range(col, k), key=lambda r: abs(xtx[r][col]))
+        if abs(xtx[pivot][col]) < 1e-9:
+            return None
+        xtx[col], xtx[pivot] = xtx[pivot], xtx[col]
+        xty[col], xty[pivot] = xty[pivot], xty[col]
+        for r in range(k):
+            if r == col:
+                continue
+            factor = xtx[r][col] / xtx[col][col]
+            for c in range(k):
+                xtx[r][c] -= factor * xtx[col][c]
+            xty[r] -= factor * xty[col]
+    beta = [xty[i] / xtx[i][i] for i in range(k)]
+    return [y[r] - sum(beta[c] * design[r][c] for c in range(k)) for r in range(n)]
+
+
+def partial_correlate(store: Store, a: str, b: str, controls: list[str],
+                      lag_days: int = 0, days: int = 90,
+                      end: date | None = None):
+    """Correlation of `a` and `b` after regressing both on `controls`.
+
+    "Late training lowers HRV" and "the nights I train late I also drink" make
+    the same raw correlation; residualising on the confounders separates them.
+    The autocorrelation-corrected interval is `daily.correlate_series`'s.
+    """
+    end = end or date.today()
+    start = end - timedelta(days=days)
+    left = dict(daily.series(store, a, start, end))
+    right = dict(daily.series(store, b, start, end))
+    ctrl = {c: dict(daily.series(store, c, start, end)) for c in controls}
+
+    days_all = sorted(set(left) & set(right)
+                      & set.intersection(*[set(v) for v in ctrl.values()])
+                      if ctrl else set(left) & set(right))
+    if len(days_all) < daily.MIN_CORRELATION_POINTS:
+        return daily.correlate_series(a, left, b, right, lag_days=lag_days)
+
+    ya = [left[d] for d in days_all]
+    yb = [right[d] for d in days_all]
+    cols = [[ctrl[c][d] for d in days_all] for c in controls]
+    ra = _ols_residuals(ya, cols) if cols else ya
+    rb = _ols_residuals(yb, cols) if cols else yb
+    if ra is None or rb is None:
+        result = daily.correlate_series(a, left, b, right, lag_days=lag_days)
+        result.note = "controls are collinear — partial correlation not estimable"
+        return result
+
+    la = {d: ra[i] for i, d in enumerate(days_all)}
+    lb = {d: rb[i] for i, d in enumerate(days_all)}
+    return daily.correlate_series(a, la, b, lb, lag_days=lag_days)
+
+
 def recovery_drivers(store: Store, targets: tuple[str, ...] = (M.HRV_RMSSD,
                      M.RESTING_HR), days: int = 90, end: date | None = None) -> dict:
     """Which behaviours actually move the targets, over the last `days`.
 
     A hypothesis generator, deliberately: many pairs are tested at once, the
     intervals are corrected for autocorrelation, and only relationships whose
-    interval clears zero are returned — with the comparison count on the record
-    and a pointer to testing one properly rather than acting on it.
+    interval clears zero are returned. Each survivor is then re-checked with the
+    other behaviours held constant — so an effect that is really a confounder
+    shows itself.
     """
     end = end or date.today()
     start = end - timedelta(days=days)
@@ -401,13 +487,29 @@ def recovery_drivers(store: Store, targets: tuple[str, ...] = (M.HRV_RMSSD,
             corr = daily.correlate_series(name, left, target, right, lag_days=lag)
             if corr.r is None or corr.crosses_zero:
                 continue
-            findings.append({
+            controls = [c for c in (M.STRAIN, M.ALCOHOL, "last_workout_hour",
+                                    M.CAFFEINE)
+                        if c != name and c in inputs]
+            controls = [c for c in controls if c in _DRIVER_METRICS]  # real columns only
+            adjusted = partial_correlate(store, name, target, controls,
+                                         lag_days=lag, days=days, end=end) \
+                if controls and name in _DRIVER_METRICS else None
+            entry = {
                 "input": name, "recovery_metric": target,
                 "lag_days": lag, "r": corr.r,
                 "ci": [corr.ci_low, corr.ci_high],
                 "n_days": corr.n, "effective_n": corr.effective_n,
                 "reading": corr.describe(),
-            })
+            }
+            if adjusted is not None and adjusted.r is not None:
+                entry["adjusted"] = {
+                    "controlling_for": controls, "r": adjusted.r,
+                    "ci": [adjusted.ci_low, adjusted.ci_high],
+                    "verdict": ("explained by " + ", ".join(controls)
+                                if adjusted.crosses_zero
+                                else "survives adjustment"),
+                }
+            findings.append(entry)
 
     findings.sort(key=lambda f: -abs(f["r"]))
     return {
@@ -422,6 +524,135 @@ def recovery_drivers(store: Store, targets: tuple[str, ...] = (M.HRV_RMSSD,
                       "state the metric first so the result is not chosen after "
                       "the fact"),
     }
+
+
+def drivers_model(store: Store, target: str = M.HRV_RMSSD, days: int = 90,
+                  end: date | None = None) -> dict:
+    """One model of the target on all the candidate behaviours at once.
+
+    The pairwise `recovery_drivers` can't tell an effect from its confounder;
+    this fits them together. Coefficients are standardised (per SD of each
+    input), so their sizes compare. It is still observational — a coefficient
+    is an association inside this model, not a lever.
+    """
+    end = end or date.today()
+    start = end - timedelta(days=days)
+
+    series = {"__target__": dict(daily.series(store, target, start, end))}
+    for metric in _DRIVER_METRICS:
+        pts = dict(daily.series(store, metric, start, end))
+        if len(pts) >= daily.MIN_CORRELATION_POINTS:
+            series[metric] = pts
+
+    names = [k for k in series if k != "__target__"]
+    days_all = sorted(set.intersection(*[set(v) for v in series.values()])) \
+        if len(series) > 1 else []
+    if len(days_all) < daily.MIN_CORRELATION_POINTS or not names:
+        return {"target": target, "note": "not enough overlapping days for a model"}
+
+    def z(values: list[float]) -> list[float]:
+        m = statistics.mean(values)
+        sd = statistics.pstdev(values) or 1.0
+        return [(v - m) / sd for v in values]
+
+    y = z([series["__target__"][d] for d in days_all])
+    cols = [z([series[n][d] for d in days_all]) for n in names]
+
+    # Collinearity: name the pairs a reader should not over-interpret.
+    collinear = []
+    for i in range(len(names)):
+        for j in range(i + 1, len(names)):
+            r = daily._pearson(cols[i], cols[j])
+            if r is not None and abs(r) > 0.8:
+                collinear.append(f"{names[i]}~{names[j]} (r={r:+.2f})")
+
+    residuals = _ols_residuals(y, cols)
+    if residuals is None:
+        return {"target": target, "note": "inputs are collinear — no stable model",
+                "collinear": collinear}
+    ss_res = sum(r * r for r in residuals)
+    ss_tot = sum(v * v for v in y)
+    r2 = 1 - ss_res / ss_tot if ss_tot else None
+
+    # Re-fit for coefficients (elimination in _ols_residuals discards beta).
+    coeffs = []
+    for i, name in enumerate(names):
+        others = [c for j, c in enumerate(cols) if j != i]
+        partial = _ols_residuals(cols[i], others) if others else cols[i]
+        py = _ols_residuals(y, others) if others else y
+        if partial is None or py is None:
+            continue
+        denom = sum(p * p for p in partial)
+        beta = sum(p * q for p, q in zip(partial, py)) / denom if denom else 0.0
+        coeffs.append({"input": name, "std_coef": round(beta, 3)})
+    coeffs.sort(key=lambda c: -abs(c["std_coef"]))
+
+    return {
+        "target": target, "window_days": days, "n_days": len(days_all),
+        "r_squared": round(r2, 3) if r2 is not None else None,
+        "standardised_coefficients": coeffs,
+        "collinear_inputs": collinear or None,
+        "caveat": "observational and in-sample — a coefficient is an association "
+                  "within this model, not a lever to pull",
+    }
+
+
+_ILLNESS_METRICS = (
+    (M.RESTING_HR, "resting HR"), (M.RESPIRATORY_RATE, "respiration rate"),
+    (M.SKIN_TEMP_DEV, "skin temperature"),
+)
+
+
+def illness_watch(store: Store, as_of: date | None = None) -> dict:
+    """Resting HR, respiration and skin temperature moving up together.
+
+    That trio rising in step is a recognised pre-symptomatic pattern — a day or
+    two before an infection announces itself. This is a flag to rest and watch,
+    never a diagnosis, and it subtracts the resting-HR rise a GLP-1 agonist is
+    expected to cause before judging.
+    """
+    as_of = as_of or date.today()
+    active_keys = [a.compound for a in protocol_features.active(store, as_of)]
+    glp1_offset = 0.0
+    for key in active_keys:
+        spec = compounds_kb.COMPOUNDS.get(key)
+        if spec and spec.resting_hr_offset_bpm and spec.klass == "glp1":
+            glp1_offset = max(glp1_offset, sum(spec.resting_hr_offset_bpm) / 2)
+
+    signals = []
+    elevated_rising = 0
+    for metric, label in _ILLNESS_METRICS:
+        recent = daily.series(store, metric, as_of - timedelta(days=27), as_of)
+        recent = [(d, v) for d, v in recent if v is not None]
+        if not recent or recent[-1][0] != as_of:
+            continue
+        value = recent[-1][1]
+        base = daily.baseline(store, metric, as_of=as_of)
+        adjusted = value - (glp1_offset if metric == M.RESTING_HR else 0.0)
+        z = base.z(adjusted)
+        t = trend_features.metric_trend(store, metric, days=12, as_of=as_of,
+                                        min_days=8)
+        rising = t.verdict == "rising"
+        # z where the baseline has spread; otherwise "today is the high point of
+        # an otherwise flat recent record" stands in for it.
+        window_max = max(v for _, v in recent[:-1]) if len(recent) > 1 else value
+        elevated = (z is not None and z >= 1.0) or (z is None and value >= window_max)
+        if elevated and rising:
+            elevated_rising += 1
+        signals.append({"metric": metric, "label": label, "value": round(value, 2),
+                        "z_vs_baseline": z, "trend": t.verdict, "rising": rising,
+                        "elevated": bool(elevated),
+                        "compound_adjusted": metric == M.RESTING_HR and glp1_offset > 0})
+
+    flag = "watch" if elevated_rising >= 2 else "clear"
+    note = ("resting HR, skin temperature and respiration are up and rising "
+            "together — this pattern often runs a day or two ahead of an "
+            "illness. Ease off and watch; it is not a diagnosis."
+            if flag == "watch" else
+            "no coordinated rise across resting HR, skin temperature and "
+            "respiration.")
+    return {"date": str(as_of), "flag": flag, "signals": signals,
+            "compound_adjustment_bpm": round(glp1_offset, 1) or None, "note": note}
 
 
 # --------------------------------------------------------------------------

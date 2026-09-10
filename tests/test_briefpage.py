@@ -82,3 +82,40 @@ def test_weekly_adds_the_cross_domain_sections():
     assert "The week" in page and "<svg" in page          # sparkline
     assert "What moved recovery" in page
     assert "strain" in page and "8 pairs tested" in page
+
+
+def test_protocol_banner_and_context_render():
+    payload = _daily_payload()
+    payload["readiness"]["on"] = [
+        {"compound": "retatrutide", "label": "Retatrutide", "weekly_dose": 2,
+         "unit": "mg", "weeks_on": 6.0, "class": "glp1", "settled": True}]
+    payload["readiness"]["context"] = [
+        "on retatrutide (week 6), which raises resting heart rate ~2–5 bpm"]
+    payload["protocol"] = {"on": payload["readiness"]["on"], "monitoring": []}
+
+    page = render(Brief(text="", span="today", payload=payload))
+
+    assert 'class="banner"' in page
+    assert "Retatrutide" in page and "2mg/wk" in page
+    assert "Context</h3>" in page
+    assert "raises resting heart rate" in page
+
+
+def test_illness_watch_flag_renders_an_alert():
+    payload = _daily_payload()
+    payload["illness_watch"] = {"flag": "watch",
+                                "note": "resting HR, skin temp and respiration "
+                                        "are up and rising together"}
+    page = render(Brief(text="", span="today", payload=payload))
+    assert 'class="alert"' in page
+    assert "rising together" in page
+
+
+def test_six_week_drift_section_renders():
+    payload = _daily_payload()
+    payload["six_week_trends"] = [
+        {"metric": "hrv_rmssd", "verdict": "falling",
+         "summary": "hrv_rmssd down 0.9/week over 42 days — a real downward drift"}]
+    page = render(Brief(text="", span="today", payload=payload))
+    assert "Six-week drift" in page
+    assert "downward drift" in page

@@ -25,8 +25,11 @@ from typing import Any
 from .config import Config
 from .features import daily, readiness
 from .features import cycle as cycle_features
+from .features import protocol as protocol_features
+from .features import sleep as sleep_features
 from .features import strength as strength_features
 from .features import training as training_features
+from .features import trend as trend_features
 from .llm import client as _client
 from .store import Store
 
@@ -39,11 +42,12 @@ seriously and want to know what today's numbers mean and what to do about them.
 You are not their doctor.
 
 What you are given is already computed: robust baselines and z-scores, an
-acute:chronic training-load ratio, a sleep-debt estimate, a readiness
-recommendation with its reasons, cycle phase where it is known, and — for the
-weekly brief — correlations and strength-versus-recovery breakdowns. Every
-figure you cite must come from this payload. Do not estimate, do not recall
-typical values, do not compute your own.
+acute:chronic training-load ratio, a sleep-debt estimate, sleep architecture
+(deep/REM/awake), six-week trends, a readiness recommendation with its reasons,
+cycle phase where it is known, the compounds the person is on and what those are
+documented to do, and — for the weekly brief — correlations and
+strength-versus-recovery breakdowns. Every figure you cite must come from this
+payload. Do not estimate, do not recall typical values, do not compute your own.
 
 Ground rules:
 
@@ -60,14 +64,26 @@ Ground rules:
   and do not raise an alarm. When it is not explained by the phase, say that
   too. The payload tells you which.
 
+- COMPOUNDS. The person is on the compounds listed under `readiness.on` /
+  `protocol`. Use them: when a metric has moved the way one of their compounds
+  is documented to move it (`readiness.context` says so), read that part as
+  expected rather than alarming. When a metric has moved the *opposite* way to
+  what a compound predicts, that is the informative case — say so. Caveat every
+  strength trend the payload flags as compound-plus-training. When a monitoring
+  marker (haematocrit, blood pressure, HDL, resting HR, energy availability) is
+  trending, escalate it: "this is worth a doctor's review". Never comment on the
+  protocol itself — not the dose, not ancillary drugs, not PCT, not whether to
+  run it. Reporting a documented effect is not advising on the compound.
+
 - NO SCORE. Do not invent an overall readiness or health score, grade, or
   percentage. The readiness field is a recommendation with reasons; report it
   that way.
 
 - ESCALATE, don't manage, a real clinical shape. Sustained low energy
-  availability with high training load and cycle disruption is the RED-S
-  signature and the right response is "these three together are worth raising
-  with a doctor", not a nutrition tweak.
+  availability with high training load (and, for anyone with a cycle, cycle
+  disruption) is the RED-S signature and the right response is "these together
+  are worth raising with a doctor", not a nutrition tweak. Rapid weight loss on
+  a GLP-1 agonist alongside heavy training is the same shape.
 
 - Say when the data is thin. A baseline built on nine days, a correlation with
   an effective sample of twelve — name the limit rather than writing around it.
@@ -130,8 +146,11 @@ def daily_payload(store: Store, day: date | None = None) -> dict[str, Any]:
             {"metric": m, "value": round(v, 3), "z": z} for m, v, z in deviations],
         "readiness": readiness.readiness(store, day).as_dict(),
         "sleep_debt": readiness.sleep_debt(store, as_of=day).as_dict(),
+        "sleep_architecture": sleep_features.sleep_quality(store, as_of=day),
         "training_load": daily.training_load(store, as_of=day).describe(),
         "sleep_regularity": daily.sleep_regularity(store, as_of=day),
+        "six_week_trends": [t.as_dict() for t in trend_features.trends(store, as_of=day)],
+        "illness_watch": readiness.illness_watch(store, as_of=day),
         "training_observations": training_features.observations(store, as_of=day),
         "yesterdays_workouts": _workouts_between(
             store, day - timedelta(days=1), day - timedelta(days=1)),
@@ -139,6 +158,9 @@ def daily_payload(store: Store, day: date | None = None) -> dict[str, Any]:
     cycle_block = _cycle_block(store, day, deviations)
     if cycle_block:
         payload["cycle"] = cycle_block
+    protocol = protocol_features.summary(store, today=day)
+    if protocol.get("on"):
+        payload["protocol"] = protocol
     return payload
 
 
@@ -168,10 +190,15 @@ def weekly_payload(store: Store, end: date | None = None) -> dict[str, Any]:
             for w, m, vol, s, _ in strength_features.weekly_volume(store, weeks=2)],
         "readiness_today": readiness.readiness(store, end).as_dict(),
         "sleep_debt": readiness.sleep_debt(store, as_of=end).as_dict(),
+        "sleep_architecture": sleep_features.sleep_quality(store, as_of=end),
+        "six_week_trends": [t.as_dict() for t in trend_features.trends(store, as_of=end)],
+        "illness_watch": readiness.illness_watch(store, as_of=end),
         "recovery_drivers": readiness.recovery_drivers(store, end=end),
+        "drivers_model": readiness.drivers_model(store, end=end),
         "strength_vs_recovery": readiness.strength_recovery_link(store, end=end),
         "training_observations": training_features.observations(store, as_of=end),
         "phase_training_plan": readiness.phase_training_plan(store, today=end),
+        "protocol": protocol_features.summary(store, today=end),
     }
 
 

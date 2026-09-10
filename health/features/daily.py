@@ -142,6 +142,7 @@ class TrainingLoad:
     acute: float
     chronic: float
     days: int
+    method: str = "ewma"
 
     @property
     def ratio(self) -> float | None:
@@ -158,39 +159,76 @@ class TrainingLoad:
             shape = "backing off"
         else:
             shape = "steady"
-        return (f"{shape}: last 7 days averaging {self.acute:.0f} against a "
-                f"28-day average of {self.chronic:.0f} (ratio {self.ratio})")
+        return (f"{shape}: a 7-day load of {self.acute:.0f} against a 28-day "
+                f"load of {self.chronic:.0f} (ratio {self.ratio})")
 
 
-def training_load(store: Store, as_of: date | None = None,
-                  acute: int = 7, chronic: int = 28) -> TrainingLoad:
+def _daily_load(store: Store, start: date, end: date) -> dict[date, float]:
+    """One load number per day: WHOOP strain plus Hevy tonnage/1000."""
+    rows = store.query(
+        """
+        SELECT local_date,
+               COALESCE(SUM(strain), 0) + COALESCE(SUM(tonnage), 0) / 1000.0
+        FROM (
+            SELECT local_date, value AS strain, NULL AS tonnage
+            FROM daily_metrics WHERE metric = 'strain'
+            UNION ALL
+            SELECT local_date, NULL, volume_kg FROM working_sets
+        )
+        WHERE local_date > ? AND local_date <= ?
+        GROUP BY local_date
+        """,
+        [start, end],
+    )
+    return {d: v for d, v in rows}
+
+
+def training_load(store: Store, as_of: date | None = None, acute: int = 7,
+                  chronic: int = 28, method: str = "ewma") -> TrainingLoad:
     """Load from WHOOP strain and Hevy tonnage, on one scale.
 
-    Tonnage is divided by 1000 so that a heavy lifting session and a hard
+    Tonnage is divided by 1000 so a heavy lifting session and a hard
     conditioning session contribute at comparable magnitudes; the number is an
     index for tracking your own ramp, not a physiological quantity.
+
+    `method="ewma"` (default) weights recent days more heavily and decays
+    smoothly — the standard exponentially-weighted acute:chronic formulation,
+    which avoids the abrupt "washout" a flat 7-day window shows when one hard
+    day drops off its trailing edge. `method="flat"` is the plain rolling mean.
     """
     as_of = as_of or date.today()
+    lookback = as_of - timedelta(days=chronic * 2)
+    per_day = _daily_load(store, lookback, as_of)
 
-    def window_mean(days: int) -> float:
-        rows = store.query(
-            """
-            SELECT COALESCE(SUM(strain), 0) + COALESCE(SUM(tonnage), 0) / 1000.0
-            FROM (
-                SELECT local_date, value AS strain, NULL AS tonnage
-                FROM daily_metrics WHERE metric = 'strain'
-                UNION ALL
-                SELECT local_date, NULL, volume_kg FROM working_sets
-            )
-            WHERE local_date > ? AND local_date <= ?
-            """,
-            [as_of - timedelta(days=days), as_of],
-        )
-        total = rows[0][0] if rows and rows[0][0] is not None else 0.0
-        return total / days
+    if method == "flat":
+        def window_mean(days: int) -> float:
+            cutoff = as_of - timedelta(days=days)
+            return sum(v for d, v in per_day.items() if d > cutoff) / days
+        return TrainingLoad(acute=round(window_mean(acute), 2),
+                            chronic=round(window_mean(chronic), 2),
+                            days=chronic, method="flat")
 
-    return TrainingLoad(acute=round(window_mean(acute), 2),
-                        chronic=round(window_mean(chronic), 2), days=chronic)
+    # EWMA over every day from when data begins to `as_of` (a rest day is a real
+    # zero, but leading days with no data at all are not — padding them would
+    # drag the chronic average down and inflate the ratio). Decay with
+    # lambda = 2/(N+1), the conventional span-to-alpha mapping.
+    first = min(per_day) if per_day else as_of
+    start = max(first, lookback + timedelta(days=1))
+    span_days = (as_of - start).days + 1
+    series = [per_day.get(start + timedelta(days=i), 0.0) for i in range(span_days)]
+    ewma_acute = _ewma(series, 2 / (acute + 1))
+    ewma_chronic = _ewma(series, 2 / (chronic + 1))
+    return TrainingLoad(acute=round(ewma_acute, 2), chronic=round(ewma_chronic, 2),
+                        days=chronic, method="ewma")
+
+
+def _ewma(values: list[float], alpha: float) -> float:
+    if not values:
+        return 0.0
+    acc = values[0]
+    for v in values[1:]:
+        acc = alpha * v + (1 - alpha) * acc
+    return acc
 
 
 def sleep_regularity(store: Store, days: int = 28,

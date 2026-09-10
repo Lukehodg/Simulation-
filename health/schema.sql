@@ -157,6 +157,34 @@ CREATE TABLE IF NOT EXISTS lab_results (
     PRIMARY KEY (source, panel_id, analyte)
 );
 
+-- What you are on, entered by hand. `event` is start | change | stop, one row
+-- per compound per event. Reconstructed into protocol_days the same way
+-- cycle_events becomes cycle_days.
+CREATE TABLE IF NOT EXISTS protocol_events (
+    source      VARCHAR NOT NULL,   -- 'manual'
+    local_date  DATE    NOT NULL,
+    event       VARCHAR NOT NULL,   -- start | change | stop
+    compound    VARCHAR NOT NULL,   -- canonical key from compounds.py
+    dose        DOUBLE,             -- per administration
+    unit        VARCHAR,            -- mg | iu | ml
+    freq        VARCHAR,            -- weekly | e3d | eod | daily
+    route       VARCHAR,            -- im | subq | oral
+    note        VARCHAR,
+    ingested_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (source, local_date, event, compound)
+);
+
+-- Derived: one row per compound per day it is active. Rebuilt from
+-- protocol_events by `health.features.protocol.rebuild`, never written directly.
+CREATE TABLE IF NOT EXISTS protocol_days (
+    local_date  DATE    NOT NULL,
+    compound    VARCHAR NOT NULL,
+    weekly_dose DOUBLE,             -- dose normalised to per-week
+    unit        VARCHAR,
+    weeks_on    DOUBLE,             -- since this compound's start, fractional
+    PRIMARY KEY (local_date, compound)
+);
+
 -- Derived: one row per day of every cycle we can reconstruct. Rebuilt from
 -- cycle_events by `health.features.cycle.rebuild`, never written by a source.
 CREATE TABLE IF NOT EXISTS cycle_days (

@@ -175,6 +175,24 @@ def test_training_load_combines_strain_and_tonnage(store):
     assert "steady" in load.describe()
 
 
+def test_ewma_is_the_default_and_flat_is_still_available(store):
+    # 21 quiet days, then a week of hard training.
+    _load(store, "strain", [5.0] * 21 + [18.0] * 7)
+    as_of = START + timedelta(days=27)
+
+    default = daily.training_load(store, as_of=as_of)
+    flat = daily.training_load(store, as_of=as_of, method="flat")
+
+    assert default.method == "ewma"
+    assert flat.method == "flat"
+    # both register the ramp as a real acute:chronic elevation
+    assert default.ratio > 1.3 and flat.ratio > 1.3
+    # the flat 7-day window sits exactly on the recent level; the EWMA blends
+    # in the days just before it, so the two numbers are not identical
+    assert flat.acute == pytest.approx(18.0, abs=0.1)
+    assert default.acute != pytest.approx(flat.acute, abs=0.5)
+
+
 def test_sleep_regularity_handles_onsets_either_side_of_midnight(store):
     from health.models import Sleep
 

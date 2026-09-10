@@ -48,6 +48,9 @@ class Analyte:
     #: Set where a result is meaningfully affected by where you are in your
     #: cycle, so draws taken in different phases are not compared blindly.
     cycle_sensitive: bool = False
+    #: True where an exogenous compound moves this analyte enough that a trend
+    #: spanning the start of that compound is not a like-for-like comparison.
+    compound_sensitive: bool = False
     note: str | None = None
     #: Sex-specific generic intervals, where one interval would be wrong for
     #: half the population. (low, high), either bound optional.
@@ -69,7 +72,7 @@ ANALYTES: dict[str, Analyte] = {a.key: a for a in [
             note="an acute-phase reactant: rises with inflammation, so a normal "
                  "ferritin alongside a raised CRP can still mask iron deficiency"),
     Analyte("haemoglobin", "Haemoglobin", "g/L", "iron", 120, 150, cycle_sensitive=True,
-            ref_male=(130, 175), ref_female=(120, 155)),
+            compound_sensitive=True, ref_male=(130, 175), ref_female=(120, 155)),
     Analyte("iron", "Serum iron", "umol/L", "iron", 10, 30, cycle_sensitive=True),
     Analyte("transferrin_saturation", "Transferrin saturation", "%", "iron", 20, 50),
     Analyte("b12", "Vitamin B12", "pmol/L", "vitamins", 180, 900),
@@ -77,12 +80,15 @@ ANALYTES: dict[str, Analyte] = {a.key: a for a in [
     Analyte("vitamin_d", "Vitamin D (25-OH)", "nmol/L", "vitamins", 50, 125),
 
     # Full blood count
-    Analyte("haematocrit", "Haematocrit", "%", "fbc",
-            ref_male=(40, 52), ref_female=(36, 48)),
+    Analyte("haematocrit", "Haematocrit", "%", "fbc", compound_sensitive=True,
+            ref_male=(40, 52), ref_female=(36, 48),
+            note="exogenous androgens raise red cell mass; a rising haematocrit "
+                 "on testosterone is expected and, past the top of the range, a "
+                 "reason to see a doctor rather than adjust anything yourself"),
     Analyte("mch", "MCH", "pg", "fbc", 27, 32),
     Analyte("mchc", "MCHC", "g/L", "fbc", 320, 360),
     Analyte("mcv", "MCV", "fL", "fbc", 80, 100),
-    Analyte("rbc", "Red blood cell count", "10^12/L", "fbc",
+    Analyte("rbc", "Red blood cell count", "10^12/L", "fbc", compound_sensitive=True,
             ref_male=(4.5, 6.5), ref_female=(3.8, 5.8)),
     Analyte("wbc", "White blood cell count", "10^9/L", "fbc", 4.0, 10.0),
     Analyte("neutrophils", "Neutrophils", "10^9/L", "fbc", 2.0, 7.5),
@@ -98,15 +104,22 @@ ANALYTES: dict[str, Analyte] = {a.key: a for a in [
     Analyte("free_t3", "Free T3", "pmol/L", "thyroid", 3.1, 6.8),
 
     # Metabolic
-    Analyte("hba1c", "HbA1c", "mmol/mol", "metabolic", None, 41),
+    Analyte("hba1c", "HbA1c", "mmol/mol", "metabolic", None, 41,
+            compound_sensitive=True),
     Analyte("glucose", "Fasting glucose", "mmol/L", "metabolic", 3.9, 5.5),
     Analyte("insulin", "Fasting insulin", "pmol/L", "metabolic", 18, 173),
 
     # Lipids
     Analyte("cholesterol", "Total cholesterol", "mmol/L", "lipids", None, 5.0),
-    Analyte("ldl", "LDL cholesterol", "mmol/L", "lipids", None, 3.0),
-    Analyte("hdl", "HDL cholesterol", "mmol/L", "lipids", 1.2, None),
-    Analyte("triglycerides", "Triglycerides", "mmol/L", "lipids", None, 1.7),
+    Analyte("ldl", "LDL cholesterol", "mmol/L", "lipids", None, 3.0,
+            compound_sensitive=True),
+    Analyte("hdl", "HDL cholesterol", "mmol/L", "lipids", 1.2, None,
+            compound_sensitive=True,
+            note="androgens, and oral 17-aa androgens especially, lower HDL; a "
+                 "fall while on them is expected but still part of a "
+                 "cardiovascular picture a clinician should read"),
+    Analyte("triglycerides", "Triglycerides", "mmol/L", "lipids", None, 1.7,
+            compound_sensitive=True),
 
     # Inflammation, liver, kidney
     Analyte("crp", "CRP", "mg/L", "inflammation", None, 5),
@@ -127,18 +140,28 @@ ANALYTES: dict[str, Analyte] = {a.key: a for a in [
 
     # Hormones — every one of these is meaningless without the cycle day
     Analyte("oestradiol", "Oestradiol", "pmol/L", "hormones", cycle_sensitive=True,
+            compound_sensitive=True,
             note="varies several-fold across the cycle; only comparable between "
-                 "draws taken in the same phase"),
+                 "draws taken in the same phase. Also rises with aromatising "
+                 "androgens and with hCG"),
     Analyte("progesterone", "Progesterone", "nmol/L", "hormones", cycle_sensitive=True,
             note="the mid-luteal value is the one that means anything; a "
                  "follicular draw is expected to be low"),
-    Analyte("lh", "LH", "IU/L", "hormones", cycle_sensitive=True),
-    Analyte("fsh", "FSH", "IU/L", "hormones", cycle_sensitive=True),
+    Analyte("lh", "LH", "IU/L", "hormones", cycle_sensitive=True,
+            compound_sensitive=True,
+            note="exogenous androgens suppress it toward zero; that is the "
+                 "expected effect, not a pituitary problem"),
+    Analyte("fsh", "FSH", "IU/L", "hormones", cycle_sensitive=True,
+            compound_sensitive=True),
     Analyte("testosterone", "Testosterone", "nmol/L", "hormones", 0.3, 1.7,
-            ref_male=(8.6, 29.0), ref_female=(0.3, 1.7)),
+            compound_sensitive=True,
+            ref_male=(8.6, 29.0), ref_female=(0.3, 1.7),
+            note="on exogenous testosterone the level reflects the dose and the "
+                 "timing of the last injection, not endogenous production; a "
+                 "trough draw and a peak draw are different questions"),
     Analyte("free_testosterone", "Free testosterone", "nmol/L", "hormones",
-            ref_male=(0.175, 0.687)),
-    Analyte("shbg", "SHBG", "nmol/L", "hormones", 30, 120),
+            compound_sensitive=True, ref_male=(0.175, 0.687)),
+    Analyte("shbg", "SHBG", "nmol/L", "hormones", 30, 120, compound_sensitive=True),
     Analyte("prolactin", "Prolactin", "mIU/L", "hormones", 100, 500),
     Analyte("amh", "AMH", "pmol/L", "hormones"),
     Analyte("cortisol", "Cortisol (morning)", "nmol/L", "hormones", 133, 537),

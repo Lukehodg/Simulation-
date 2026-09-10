@@ -151,19 +151,52 @@ def training_indicator(store: Store, as_of: date | None = None) -> Indicator:
 
 
 def sleep_indicator(store: Store, as_of: date | None = None) -> Indicator:
-    """Duration and, more predictive, regularity."""
+    """Duration, regularity, and what last night was made of."""
+    from . import sleep as sleep_features
+
     as_of = as_of or date.today()
     stats = daily.sleep_regularity(store, as_of=as_of)
     if stats.get("note"):
         return Indicator("Sleep", STATUS_UNKNOWN, STRONG, stats["note"])
     duration = stats["mean_duration_hours"]
     onset_sd = stats["onset_sd_hours"]
-    status = STATUS_WATCH if (duration < 7 or onset_sd > 1.5) else STATUS_OK
+
+    architecture = sleep_features.sleep_quality(store, as_of=as_of)
+    arch_flags = architecture.get("flags", [])
+    status = (STATUS_WATCH if (duration < 7 or onset_sd > 1.5 or arch_flags)
+              else STATUS_OK)
+    detail = (f"{duration:.1f} h average over {stats['nights']} nights, "
+              f"bedtime varying ±{onset_sd:.1f} h")
+    if arch_flags:
+        detail += f"; last night {', '.join(arch_flags)}"
+    return Indicator("Sleep", status, STRONG, detail,
+                     basis=["sleeps"], n=stats["nights"])
+
+
+def protocol_indicator(store: Store, as_of: date | None = None) -> Indicator | None:
+    """Compounds in play, and any monitoring marker that is actually moving.
+
+    Not a judgement on the protocol — the status is `watch` only when a marker
+    a clinician should see is trending, and the fix is always "see a clinician".
+    """
+    from . import protocol as protocol_features
+
+    as_of = as_of or date.today()
+    active = protocol_features.active(store, as_of)
+    if not active:
+        return None
+
+    on = ", ".join(f"{a.label} ({a.weeks_on:.0f}w)" for a in active)
+    moving = [m for m in protocol_features.monitoring(store, as_of)
+              if m.get("current_trend")]
+    status = STATUS_WATCH if moving else STATUS_OK
+    detail = on
+    if moving:
+        detail += " — " + "; ".join(f"{m['marker']} {m['current_trend']}"
+                                    for m in moving)
     return Indicator(
-        "Sleep", status, STRONG,
-        f"{duration:.1f} h average over {stats['nights']} nights, "
-        f"bedtime varying ±{onset_sd:.1f} h",
-        basis=["sleeps"], n=stats["nights"])
+        name="On", status=status, evidence=MODERATE, detail=detail,
+        basis=[a.compound for a in active], n=len(active))
 
 
 def completeness(store: Store, as_of: date | None = None) -> dict:
@@ -218,8 +251,11 @@ def all_indicators(store: Store, as_of: date | None = None) -> dict:
     an oversight to be helpfully filled in.
     """
     as_of = as_of or date.today()
+    protocol = protocol_indicator(store, as_of)
     indicators = [recovery_indicator(store, as_of), sleep_indicator(store, as_of),
-                  training_indicator(store, as_of), *blood_indicators(store)]
+                  training_indicator(store, as_of),
+                  *([protocol] if protocol else []),
+                  *blood_indicators(store)]
     return {
         "as_of": str(as_of),
         "indicators": [i.as_dict() for i in indicators],
