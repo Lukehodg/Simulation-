@@ -11,8 +11,10 @@ ones become the base for the next attempt, and every attempt is recorded in a
 ledger that outlives the code it describes.
 
 This directory is a standalone subproject. It shares nothing with the Unity
-simulator in the rest of the repository — no Unity, no packages, no network,
-Python 3.10+ and the standard library only.
+simulator in the rest of the repository — no Unity, Python 3.10+ and the
+standard library only. The one exception is the optional `llm` task, which
+talks to Claude and wants `pip install anthropic`; everything else, that task's
+offline simulator included, runs with nothing installed.
 
 ## Quick start
 
@@ -119,6 +121,90 @@ beam width bites, half perfect mazes where the step budget bites. The seed
 genome solves 10 of 16; a tuned one solves all 16. So tuning is worth something
 measurable, which is what keeps the upgrade loop from being decoration.
 
+## The second task: evolving a prompt against Claude
+
+`--task llm` points the same lifecycle at the Claude API. The agent answers a
+fixed set of eight questions with exact answers, and **what evolves is the
+wording of its own system prompt**: the genome carries a list of indices into
+a clause pool (`selfmod/llm_task.py`), and a child is a copy of the agent
+whose `PROMPT_CLAUSES` differ.
+
+```console
+$ pip install anthropic          # only needed for this task
+$ export ANTHROPIC_API_KEY=...   # or: ant auth login
+$ python3 -m selfmod init && python3 -m selfmod evolve --task llm --cycles 40
+```
+
+Grading is programmatic — normalised exact match against a fixed answer key.
+**The model never marks its own work.** In this lineage passing is what buys
+the right to reproduce, so a self-graded task would just evolve a better
+opinion of itself. The one self-assessment the agent is allowed at runtime is
+whether a reply *looks* like a bare value; whether it is the *right* value is
+settled by the key.
+
+Watch it run offline first — the simulated backend is deterministic, free, and
+models the same pressures (formatting clauses matter, prose clauses break
+exact match, a low token ceiling truncates the long items):
+
+```console
+$ SELFMOD_LLM_BACKEND=simulated python3 -m selfmod evolve --task llm --cycles 80 --patience 40
+cycle 9:  gen-0001: upgraded  4/8 exact  prompt +clause 5;                score 0.499 -> 0.624
+cycle 10: gen-0010: upgraded  5/8 exact  prompt +clause 1;                score 0.624 -> 0.749
+cycle 23: gen-0012: upgraded  6/8 exact  mutated llm_answer_tokens 1024->5994, llm_effort 0->2 (widened x3.0)
+cycle 45: gen-0024: upgraded  7/8 exact  mutated llm_answer_tokens 5994->8000
+cycle 61: gen-0046: upgraded  7/8 exact  prompt +clause 6;                score 0.874 -> 0.999
+
+* gen-0001  score +0.499  survived  4/8 exact, 47 output tokens/item
+  * gen-0010  score +0.624  survived  5/8 exact
+    ...
+      * gen-0062  score +0.999  survived  8/8 exact, 43 output tokens/item
+```
+
+Seven surviving generations out of 81 born: 74 children were rejected and
+deleted along the way.
+The seed prompt gets 4 of 8; the lineage ends on the clause set that gets all
+8, with the token ceiling raised to carry the two long answers. The clauses
+that invite prose get proposed too — each of those children scored 0/8 and
+deleted itself.
+
+### The genes
+
+| Gene | What it does |
+|---|---|
+| `PROMPT_CLAUSES` | Indices into `CLAUSES`; assembled in order into the system prompt. Mutations add, drop, swap or reorder one clause — weighted toward adding while the prompt is short. |
+| `llm_effort` | Index into `low … max`, passed as `output_config.effort`. Thinking is on by default on Opus 5; this is the depth dial. |
+| `llm_answer_tokens` | `max_tokens` for the reply. |
+| `llm_reask_limit` | How many times to re-ask when a reply comes back unusable, with the formatting demand moved to the end of the user turn. |
+
+There is no `temperature` gene: sampling parameters are rejected on Opus 5, so
+effort and prompt wording are the real dials. Each task declares the genes it
+reads (`Task.genes`), so a `pathfind` lineage never wastes a cycle tuning
+`llm_effort`, and vice versa.
+
+### Spending, and not spending
+
+Three guards, because this loop runs unattended:
+
+- **A cache above the generations.** Replies are keyed by the exact request
+  and stored in `workspace/llm-cache/`, so a parent re-proving an unchanged
+  genome every cycle costs nothing. In the run above, most cycles show
+  `0 calls (8 cached)`.
+- **A call budget.** `SELFMOD_LLM_MAX_CALLS` (default 120 per process) stops a
+  runaway lineage. Exceeding it abstains rather than fails.
+- **Abstention instead of failure.** A missing key, an unreachable API, a
+  rate limit that survived the SDK's retries, or a spent budget raises
+  `TaskUnavailable`, and the cycle ends as `task-unavailable`: nothing is
+  deleted, nothing is promoted, the head stays put. **An expired API key must
+  never look like a task the agent failed** — failing a task here means
+  deletion.
+
+A cycle costs at most `2 × 8` calls (the parent's verdict and the child's
+self-check), minus cache hits; `run`/`evolve` print the ceiling before
+starting. Requests go to `claude-opus-5` with server-side refusal fallbacks
+enabled, so a single declined item is retried on a fallback model inside the
+same call instead of reading as a wrong answer. Override the model with
+`SELFMOD_LLM_MODEL`.
+
 ## Safety model
 
 Self-deleting code deserves to be fenced in. Every destructive call goes
@@ -167,12 +253,16 @@ REGISTRY[DeployTask.name] = DeployTask()
 
 `passed` decides deletion versus upgrade; `score` decides whether a proposed
 child is kept. If your task has params of its own, add them to `PARAMS` and
-`BOUNDS` in `genome.py` — `BOUNDS` is the envelope the lineage may explore and
-is not itself mutable.
+`BOUNDS` in `genome.py`, and list them in `Task.genes` so mutation targets
+them — `BOUNDS` is the envelope the lineage may explore and is not itself
+mutable. Raise `TaskUnavailable` (not a failing verdict) for anything that
+means "could not be judged": that is the difference between a bad genome and
+a bad afternoon for your network.
 
 Two caveats before pointing this at anything real: the task runs in-process
 with no isolation beyond the sandbox, and a scored hill-climb will happily
-exploit a badly designed score. Score what you actually want.
+exploit a badly designed score. Score what you actually want — and keep the
+grader out of the model's reach, as `llm` does.
 
 ## Tests
 
@@ -180,12 +270,15 @@ exploit a badly designed score. Score what you actually want.
 $ cd agent && python3 -m unittest discover -s tests -t .
 ```
 
-43 tests, standard library only. They cover the containment rules (escape via
-`..`, via symlink, via a forged marker outside the workspace, and deletion of
-the root itself are each refused), the genome rewrite, mutation bounds and
-seed stability, task determinism, and the full lifecycle end to end with real
-subprocesses and real deletions — upgrade, rejection, self-destruction,
-rollback to parent, extinction, and a head too broken to run.
+66 tests, standard library only, and **no test calls the API** — the suite
+forces the simulated backend in `tests/__init__.py`. They cover the
+containment rules (escape via `..`, via symlink, via a forged marker outside
+the workspace, and deletion of the root itself are each refused), the genome
+rewrite including the prompt gene, mutation bounds and seed stability, task
+determinism, the reply cache and call budget, abstention deleting nothing, and
+the full lifecycle end to end with real subprocesses and real deletions —
+upgrade, rejection, self-destruction, rollback to parent, extinction, and a
+head too broken to run.
 
 ## Layout
 
@@ -198,8 +291,13 @@ agent/
     genome.py        the mutable parameters, and the rewriter that edits them
     mutate.py        seeded hill-climbing with plateau pressure
     tasks.py         the pathfinding suite, plus tasks that always fail or pass
+    llm_task.py      the Claude task whose system prompt is part of the genome
+    llm.py           the API backend, reply cache, call budget and offline stand-in
+    errors.py        TaskUnavailable: could not be judged, so nothing is deleted
     orchestrator.py  seeding, running the head, evolving, status
     cli.py           python -m selfmod ...
   tests/
-  workspace/         created by `init`; gitignored, and the only deletable place
+  requirements-llm.txt   only for --task llm: the anthropic SDK
+  workspace/         created by `init`; gitignored, and holds the reply cache
+                     and the generations — the only deletable place
 ```

@@ -18,7 +18,8 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import genome, lineage, mutate, tasks
+from . import genome, lineage, llm, mutate, tasks
+from .errors import TaskUnavailable
 from .sandbox import MARKER, Sandbox
 
 IGNORE = shutil.ignore_patterns("__pycache__", "*.pyc", "workspace", ".git")
@@ -76,7 +77,18 @@ class Agent:
     # -- lifecycle --------------------------------------------------------
     def live(self) -> Outcome:
         task = tasks.get(self.task_name)
-        verdict = task.run(genome.PARAMS, seed=self.seed)
+        try:
+            verdict = task.run(genome.PARAMS, seed=self.seed,
+                               clauses=genome.PROMPT_CLAUSES)
+        except TaskUnavailable as exc:
+            # Could not be judged at all — a missing key, a dead network, a
+            # spent budget. Failing to be judged is not failing, so nothing
+            # is deleted and the head stays where it is.
+            note = f"task unavailable: {exc}"
+            self.ledger.record(lineage.SPARED, self.name, detail=note)
+            return Outcome(self.name, "task-unavailable",
+                           {"passed": None, "score": None, "detail": note},
+                           detail=note, notes=[note])
 
         if not verdict.passed:
             return self.self_destruct(verdict)
@@ -151,12 +163,30 @@ class Agent:
             return Outcome(self.name, "upgrade-blocked", verdict.as_dict(),
                            detail=f"{child_dir} already exists")
 
+        task = tasks.get(self.task_name)
+        pressure = self.rejection_streak()
         rng = random.Random(mutate.seed_for(self.name, self.cycle))
-        child_params, note = mutate.propose(
-            dict(genome.PARAMS), genome.BOUNDS, rng=rng,
-            integral=genome.INTEGRAL, pressure=self.rejection_streak(),
-        )
-        if note == "mutation was a no-op":
+
+        child_clauses = list(genome.PROMPT_CLAUSES)
+        clause_note = ""
+        # A task whose prompt is part of its genome splits its cycles between
+        # rewording the prompt and retuning the numbers.
+        mutate_prompt = task.evolves_prompt and rng.random() < 0.6
+        if mutate_prompt:
+            child_clauses, clause_note = mutate.propose_clauses(
+                child_clauses, genome.CLAUSE_POOL, rng=rng, pressure=pressure,
+            )
+            child_params, note = dict(genome.PARAMS), clause_note
+        else:
+            child_params, note = mutate.propose(
+                dict(genome.PARAMS), genome.BOUNDS, rng=rng,
+                integral=genome.INTEGRAL, pressure=pressure, only=task.genes,
+            )
+
+        unchanged = (child_params == dict(genome.PARAMS)
+                     and child_clauses == list(genome.PROMPT_CLAUSES))
+        if unchanged:
+            note = "mutation was a no-op"
             self.ledger.record(lineage.SPARED, self.name, detail=note)
             return Outcome(self.name, "no-mutation", verdict.as_dict(), detail=note)
 
@@ -170,10 +200,11 @@ class Agent:
             generation=genome.GENERATION + 1,
             ancestry=f"{genome.ANCESTRY}>{self.name}",
             params=child_params,
+            clauses=child_clauses,
         )
         self.ledger.record(
             lineage.BORN, child_name, parent=self.name, params=child_params,
-            detail=note, task=self.task_name,
+            clauses=child_clauses, detail=note, task=self.task_name,
         )
 
         check = self.validate(child_dir)
@@ -216,6 +247,7 @@ class Agent:
         env = dict(os.environ)
         env["PYTHONPATH"] = str(child_dir) + os.pathsep + env.get("PYTHONPATH", "")
         env["PYTHONDONTWRITEBYTECODE"] = "1"
+        env.setdefault(llm.ENV_CACHE, str(self.workspace / "llm-cache"))
         try:
             proc = subprocess.run(
                 [sys.executable, "-m", "selfmod", "selfcheck",
@@ -242,6 +274,8 @@ class Agent:
 def selfcheck(task: str = "pathfind", seed: int = 7) -> dict:
     """What a child runs to prove it is a working, better agent than its parent."""
     problems = []
+    if genome.clamp_clauses(genome.PROMPT_CLAUSES) != list(genome.PROMPT_CLAUSES):
+        problems.append(f"prompt clauses {genome.PROMPT_CLAUSES} are not valid")
     for key, value in genome.PARAMS.items():
         low, high = genome.BOUNDS.get(key, (None, None))
         if low is None:
@@ -253,12 +287,21 @@ def selfcheck(task: str = "pathfind", seed: int = 7) -> dict:
                 "generation": genome.GENERATION,
                 "detail": "genome integrity: " + "; ".join(problems)}
 
-    verdict = tasks.get(task).run(genome.PARAMS, seed=seed)
+    try:
+        verdict = tasks.get(task).run(genome.PARAMS, seed=seed,
+                                      clauses=genome.PROMPT_CLAUSES)
+    except TaskUnavailable as exc:
+        # The parent must not promote a child it could not actually judge.
+        return {"ok": False, "passed": False, "score": None,
+                "generation": genome.GENERATION,
+                "detail": f"task unavailable: {exc}"}
+
     return {
         "ok": True,
         "passed": verdict.passed,
         "score": round(verdict.score, 6),
         "generation": genome.GENERATION,
         "params": dict(genome.PARAMS),
+        "clauses": list(genome.PROMPT_CLAUSES),
         "detail": verdict.detail,
     }

@@ -13,8 +13,10 @@ import argparse
 import json
 from pathlib import Path
 
+import os
+
 from . import agent as agent_mod
-from . import genome, lineage, orchestrator
+from . import genome, lineage, llm, orchestrator, tasks
 
 DEFAULT_WORKSPACE = "workspace"
 
@@ -29,7 +31,8 @@ def _add_common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--workspace", help="where generations live "
                                             "(default: agent/workspace)")
     parser.add_argument("--task", default="pathfind",
-                        help="task the generation must pass (default: pathfind)")
+                        help="task the generation must pass "
+                             f"({', '.join(tasks.names())}; default: pathfind)")
     parser.add_argument("--seed", type=int, default=7,
                         help="task seed; the same seed replays the same suite")
     parser.add_argument("--dry-run", action="store_true",
@@ -79,14 +82,34 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _cost_notice(task: str, cycles: int) -> None:
+    """Say what a run will cost before it starts spending."""
+    if task != "llm":
+        return
+    backend = os.environ.get(llm.ENV_BACKEND, "anthropic").strip().lower()
+    if backend != "anthropic":
+        print(f"note: llm task running on the {backend} backend — no API calls")
+        return
+    from .llm_task import ITEMS
+
+    per_cycle = 2 * len(ITEMS)
+    print(f"note: the llm task calls {llm.DEFAULT_MODEL} — up to ~{per_cycle} "
+          f"calls per cycle ({per_cycle * cycles} for {cycles}), minus cache "
+          f"hits. Set {llm.ENV_BACKEND}=simulated to run it offline, or "
+          f"{llm.ENV_BUDGET} to cap spend.")
+
+
 def _describe(outcome: dict) -> str:
     verdict = outcome.get("verdict") or {}
     who = outcome.get("generation")
     bits = [f"{who}: {outcome['action']}" if who else str(outcome.get("action"))]
-    if verdict:
-        bits.append(f"[{'pass' if verdict.get('passed') else 'FAIL'} "
+    passed = verdict.get("passed")
+    if verdict and passed is not None:
+        bits.append(f"[{'pass' if passed else 'FAIL'} "
                     f"score {verdict.get('score')}] {verdict.get('detail', '')}")
-    if outcome.get("detail"):
+    elif verdict.get("detail"):
+        bits.append(verdict["detail"])
+    if outcome.get("detail") and outcome["detail"] not in bits[-1]:
         bits.append(outcome["detail"])
     deletion = outcome.get("deletion") or {}
     if deletion.get("refusal"):
@@ -96,7 +119,9 @@ def _describe(outcome: dict) -> str:
                     f"({deletion['bytes']} bytes) at {deletion['target']}")
     elif deletion:
         bits.append(f"dry run: would delete {deletion['target']}")
-    bits.extend(outcome.get("notes") or [])
+    # Notes often restate the detail; say each thing once.
+    bits.extend(note for note in (outcome.get("notes") or [])
+                if not any(note in bit for bit in bits))
     return "  ".join(b for b in bits if b)
 
 
@@ -109,6 +134,7 @@ def main(argv=None) -> int:
         return 0 if result.get("created") or result.get("head") else 1
 
     if args.command == "run":
+        _cost_notice(args.task, 1)
         outcome = orchestrator.run_cycle(
             _workspace(args), task=args.task, seed=args.seed,
             armed=not args.dry_run, cycle=0,
@@ -117,6 +143,8 @@ def main(argv=None) -> int:
         return 0 if outcome.get("action") not in ("error", "missing") else 1
 
     if args.command == "evolve":
+        _cost_notice(args.task, args.cycles)
+
         def report(index, outcome):
             print(f"cycle {index + 1}: {_describe(outcome)}")
 

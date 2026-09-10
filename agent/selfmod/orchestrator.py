@@ -15,7 +15,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from . import genome, lineage
+from . import genome, lineage, llm
 from .agent import IGNORE
 from .sandbox import MARKER, Sandbox
 
@@ -84,6 +84,9 @@ def run_cycle(workspace: Path, *, task: str = "pathfind", seed: int = 7,
     env = dict(os.environ)
     env["PYTHONPATH"] = str(home) + os.pathsep + env.get("PYTHONPATH", "")
     env["PYTHONDONTWRITEBYTECODE"] = "1"
+    # One cache for the whole lineage, kept above the generations so it
+    # survives them: an unchanged genome re-proves itself for free.
+    env.setdefault(llm.ENV_CACHE, str(workspace / "llm-cache"))
     argv = [sys.executable, "-m", "selfmod", "cycle",
             "--home", str(home), "--workspace", str(workspace),
             "--task", task, "--seed", str(seed), "--cycle", str(cycle)]
@@ -114,7 +117,7 @@ def run_cycle(workspace: Path, *, task: str = "pathfind", seed: int = 7,
 
 
 STOP_ACTIONS = ("extinct", "uninitialised", "missing", "error", "terminated",
-                "unrunnable", "terminated-by-supervisor")
+                "unrunnable", "terminated-by-supervisor", "task-unavailable")
 
 
 def evolve(workspace: Path, *, cycles: int = 5, task: str = "pathfind",

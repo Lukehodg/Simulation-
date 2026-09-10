@@ -20,7 +20,11 @@ PARAMS = {
     "step_budget": 200,
     "retry_limit": 0,
     "tie_breaker": 0.05,
+    "llm_effort": 1,
+    "llm_answer_tokens": 1024,
+    "llm_reask_limit": 0,
 }
+PROMPT_CLAUSES = [0, 2]
 # --- genome:end ---
 
 #: Inclusive bounds every mutation is clamped to. Not itself mutable: this is
@@ -31,10 +35,18 @@ BOUNDS: dict[str, tuple[float, float]] = {
     "step_budget": (40, 4000),
     "retry_limit": (0, 4),
     "tie_breaker": (0.0, 1.0),
+    "llm_effort": (0, 4),
+    "llm_answer_tokens": (256, 8000),
+    "llm_reask_limit": (0, 3),
 }
 
 #: Parameters that must stay whole numbers when mutated.
-INTEGRAL = frozenset({"beam_width", "step_budget", "retry_limit"})
+INTEGRAL = frozenset({"beam_width", "step_budget", "retry_limit", "llm_effort",
+                      "llm_answer_tokens", "llm_reask_limit"})
+
+#: How many clauses the prompt gene may draw on. Kept here rather than in the
+#: task so the mutator never has to import a task to know the shape of a gene.
+CLAUSE_POOL = 8
 
 BEGIN = "# --- genome:begin ---"
 END = "# --- genome:end ---"
@@ -46,6 +58,7 @@ def current() -> dict:
         "generation": GENERATION,
         "ancestry": ANCESTRY,
         "params": dict(PARAMS),
+        "clauses": list(PROMPT_CLAUSES),
     }
 
 
@@ -58,7 +71,18 @@ def clamp(params: dict) -> dict:
     return out
 
 
-def render_block(generation: int, ancestry: str, params: dict) -> str:
+def clamp_clauses(clauses) -> list[int]:
+    """Valid clause indices, de-duplicated, order preserved."""
+    seen: list[int] = []
+    for value in clauses:
+        index = int(value)
+        if 0 <= index < CLAUSE_POOL and index not in seen:
+            seen.append(index)
+    return seen
+
+
+def render_block(generation: int, ancestry: str, params: dict,
+                 clauses=()) -> str:
     lines = [
         BEGIN + " (rewritten by selfmod.genome.rewrite; edit by hand freely)",
         f"GENERATION = {int(generation)}",
@@ -68,11 +92,13 @@ def render_block(generation: int, ancestry: str, params: dict) -> str:
     for key in sorted(params):
         lines.append(f"    {key!r}: {params[key]!r},")
     lines.append("}")
+    lines.append(f"PROMPT_CLAUSES = {clamp_clauses(clauses)!r}")
     lines.append(END)
     return "\n".join(lines)
 
 
-def rewrite(path: Path, *, generation: int, ancestry: str, params: dict) -> str:
+def rewrite(path: Path, *, generation: int, ancestry: str, params: dict,
+            clauses=()) -> str:
     """Replace the genome block inside the ``genome.py`` file at ``path``."""
     source = Path(path).read_text(encoding="utf-8")
     pattern = re.compile(
@@ -80,7 +106,7 @@ def rewrite(path: Path, *, generation: int, ancestry: str, params: dict) -> str:
     )
     if not pattern.search(source):
         raise ValueError(f"no genome block found in {path}")
-    block = render_block(generation, ancestry, clamp(params))
+    block = render_block(generation, ancestry, clamp(params), clauses)
     updated = pattern.sub(lambda _: block, source, count=1)
     Path(path).write_text(updated, encoding="utf-8")
     return block

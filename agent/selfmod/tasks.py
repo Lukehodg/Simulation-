@@ -33,7 +33,16 @@ class Task:
     name = "task"
     description = ""
 
-    def run(self, params: dict, *, seed: int = 0) -> Verdict:  # pragma: no cover
+    #: Genome parameters this task actually reads. Mutation is restricted to
+    #: them, so a lineage never spends a cycle tuning a knob that does nothing.
+    #: Empty means "every parameter".
+    genes: tuple[str, ...] = ()
+
+    #: Whether the task's prompt clauses are part of what evolves.
+    evolves_prompt = False
+
+    def run(self, params: dict, *, seed: int = 0,
+            clauses=()) -> Verdict:  # pragma: no cover
         raise NotImplementedError
 
 
@@ -169,8 +178,10 @@ def search(grid, *, beam_width: int, heuristic_weight: float, step_budget: int,
 class PathfindTask(Task):
     name = "pathfind"
     description = "solve seeded grid mazes within the genome's search budget"
+    genes = ("beam_width", "heuristic_weight", "step_budget", "retry_limit",
+             "tie_breaker")
 
-    def run(self, params: dict, *, seed: int = 0) -> Verdict:
+    def run(self, params: dict, *, seed: int = 0, clauses=()) -> Verdict:
         beam_width = int(params.get("beam_width", 3))
         weight = float(params.get("heuristic_weight", 1.0))
         budget = int(params.get("step_budget", 150))
@@ -219,7 +230,7 @@ class ImpossibleTask(Task):
     name = "impossible"
     description = "a task no genome can pass; used to demonstrate self-deletion"
 
-    def run(self, params: dict, *, seed: int = 0) -> Verdict:
+    def run(self, params: dict, *, seed: int = 0, clauses=()) -> Verdict:
         return Verdict(False, 0.0, "task is unpassable by construction",
                        {"unreachable": True})
 
@@ -230,7 +241,7 @@ class AlwaysTask(Task):
     name = "always"
     description = "a trivially passable task; used in tests"
 
-    def run(self, params: dict, *, seed: int = 0) -> Verdict:
+    def run(self, params: dict, *, seed: int = 0, clauses=()) -> Verdict:
         score = min(1.0, float(params.get("beam_width", 1)) / 16.0)
         return Verdict(True, score, "trivially satisfied", {})
 
@@ -240,9 +251,27 @@ REGISTRY: dict[str, Task] = {
 }
 
 
+def _load_llm() -> None:
+    from . import llm_task
+
+    llm_task.register(REGISTRY)
+
+
+#: Tasks registered on first use, so importing this module never drags in a
+#: network client or an optional dependency.
+LAZY = {"llm": _load_llm}
+
+
+def names() -> list[str]:
+    return sorted(set(REGISTRY) | set(LAZY))
+
+
 def get(name: str) -> Task:
+    if name not in REGISTRY and name in LAZY:
+        LAZY[name]()
     try:
         return REGISTRY[name]
     except KeyError:
-        known = ", ".join(sorted(REGISTRY))
-        raise KeyError(f"unknown task {name!r}; known tasks: {known}") from None
+        raise KeyError(
+            f"unknown task {name!r}; known tasks: {', '.join(names())}"
+        ) from None

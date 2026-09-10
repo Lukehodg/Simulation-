@@ -146,6 +146,59 @@ class LifecycleTests(unittest.TestCase):
         self.assertFalse(report.performed)
         self.assertTrue((victim / "keep.txt").is_file())
 
+    # -- a task that cannot be judged -------------------------------------
+    def test_an_unjudgeable_task_deletes_nothing(self):
+        from selfmod import tasks
+        from selfmod.agent import Agent
+        from selfmod.errors import TaskUnavailable
+
+        class Abstains(tasks.Task):
+            name = "abstains"
+
+            def run(self, params, *, seed=0, clauses=()):
+                raise TaskUnavailable("no credentials")
+
+        tasks.REGISTRY["abstains"] = Abstains()
+        try:
+            agent = Agent(self.gen_dir("gen-0001"), self.workspace,
+                          task="abstains", seed=7)
+            outcome = agent.live()
+        finally:
+            del tasks.REGISTRY["abstains"]
+
+        self.assertEqual(outcome.action, "task-unavailable")
+        self.assertTrue(self.gen_dir("gen-0001").is_dir())
+        self.assertEqual(self.ledger.head().name, "gen-0001")
+        events = [e["event"] for e in self.ledger.entries()]
+        self.assertNotIn(lineage.TERMINATED, events)
+
+    # -- the prompt-evolving task -----------------------------------------
+    def test_the_llm_lineage_evolves_its_prompt(self):
+        from selfmod import genome as seed_genome
+
+        for cycle in range(14):
+            outcome = orchestrator.run_cycle(self.workspace, task="llm", seed=7,
+                                             cycle=cycle)
+            self.assertNotEqual(outcome["action"], "task-unavailable",
+                                outcome.get("detail"))
+            if outcome["action"] == "upgraded":
+                child_src = (self.gen_dir(outcome["child"]) / "selfmod"
+                             / "genome.py").read_text()
+                namespace: dict = {}
+                exec(compile(child_src, "child", "exec"), namespace)
+                changed = (namespace["PROMPT_CLAUSES"]
+                           != list(seed_genome.PROMPT_CLAUSES)
+                           or namespace["PARAMS"] != dict(seed_genome.PARAMS))
+                self.assertTrue(changed, "an upgrade changed nothing")
+                return
+        self.fail("no upgrade on the llm task within 14 cycles")
+
+    def test_the_llm_lineage_shares_one_cache_above_the_generations(self):
+        orchestrator.run_cycle(self.workspace, task="llm", seed=7)
+        cache = self.workspace / "llm-cache"
+        self.assertTrue(cache.is_dir())
+        self.assertTrue(any(cache.iterdir()))
+
     # -- reporting --------------------------------------------------------
     def test_status_and_tree_describe_the_lineage(self):
         self.advance_to_upgrade()
