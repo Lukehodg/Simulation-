@@ -77,6 +77,10 @@ class Agent:
     # -- lifecycle --------------------------------------------------------
     def live(self) -> Outcome:
         task = tasks.get(self.task_name)
+        # Tasks that keep books of their own need to know which generation is
+        # spending, and where the books are kept.
+        os.environ["SELFMOD_GENERATION"] = self.name
+        os.environ["SELFMOD_WORKSPACE"] = str(self.workspace)
         try:
             verdict = task.run(genome.PARAMS, seed=self.seed,
                                clauses=genome.PROMPT_CLAUSES)
@@ -249,6 +253,8 @@ class Agent:
         env["PYTHONPATH"] = str(child_dir) + os.pathsep + env.get("PYTHONPATH", "")
         env["PYTHONDONTWRITEBYTECODE"] = "1"
         env.setdefault(llm.ENV_CACHE, str(self.workspace / "llm-cache"))
+        env["SELFMOD_WORKSPACE"] = str(self.workspace)
+        env["SELFMOD_GENERATION"] = child_dir.name
         try:
             proc = subprocess.run(
                 [sys.executable, "-m", "selfmod", "selfcheck",

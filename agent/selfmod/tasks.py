@@ -269,9 +269,15 @@ def _load_mission() -> None:
     mission.register(REGISTRY)
 
 
+def _load_earn() -> None:
+    from . import economy
+
+    economy.register(REGISTRY)
+
+
 #: Tasks registered on first use, so importing this module never drags in a
 #: network client or an optional dependency.
-LAZY = {"llm": _load_llm, "mission": _load_mission}
+LAZY = {"llm": _load_llm, "mission": _load_mission, "earn": _load_earn}
 
 
 def names() -> list[str]:

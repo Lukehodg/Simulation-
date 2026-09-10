@@ -63,6 +63,7 @@ deleting nothing.
 | `lineage` | Print the family tree with scores and outcomes. |
 | `status [--json]` | Head, living generations, best score, and any divergence between the ledger and the disk. |
 | `selfcheck [--json]` | Evaluate the genome of the copy you are running. This is what a child runs to prove itself. |
+| `earn "..."` | Produce sellable work and stay solvent, or go bankrupt and self-delete. |
 | `do "..."` | Give one instruction with checks: complete it or self-delete. |
 | `new [--template]` | Write a question file — by interview, or as an example to edit. |
 | `check FILE` | Validate a question file and print the prompt it produces. |
@@ -123,6 +124,80 @@ seeded instances of rising difficulty, half scattered-obstacle grids where the
 beam width bites, half perfect mazes where the step budget bites. The seed
 genome solves 10 of 16; a tuned one solves all 16. So tuning is worth something
 measurable, which is what keeps the upgrade loop from being decoration.
+
+## Paying for itself: `earn`
+
+The survival condition becomes solvency. The agent produces work you can
+sell, every call it makes is priced into a spend ledger, and the money that
+came in is read from a command **you** point at a real account. It lives
+while `stake + revenue - spent > 0` and the work still passes your checks;
+when it runs out of runway, the generation deletes itself.
+
+```console
+$ echo 0 > revenue.txt          # or a Stripe/PayPal balance command
+$ python3 -m selfmod earn "Write a 120-word landing page for a Leeds plumber" \
+      --stake 5 --revenue-command "cat revenue.txt" \
+      --min-words 100 --must-not-contain "As an AI" --cycles 8
+```
+
+```
+work: "Write a 120-word landing page for a Leeds plumber"
+
+stake:   5 put in up front
+revenue: whatever `cat revenue.txt` prints
+
+survives while: stake + revenue - what it has spent > 0
+                and the work still passes those checks
+otherwise:      the generation deletes itself
+
+cycle 1: gen-0001: child-rejected  balance +0.4990 (stake 0.005 + revenue 0.5
+         - spent 0.0060), this cycle cost 0.0060, 1/1 checks
+...
+spent so far: 0.0443  (ledger: workspace/spend.jsonl)
+still running: gen-0001 (score 0.9745)
+work to sell:  /path/to/deliverables
+```
+
+Starve it and you get the other ending:
+
+```
+cycle 1: gen-0001: terminated  balance -0.0010 (stake 0.005 + revenue 0.00
+         - spent 0.0060) — BANKRUPT   deleted 17 files
+Bankrupt or failing its own quality bar: the last generation deleted itself
+and the lineage is extinct.
+```
+
+**What it cannot do — read this before pointing it at anything.** It writes
+text. It has no account, cannot take payment, cannot contact anyone, cannot
+post or send. Finished work lands in `--deliverables` (default
+`./deliverables`) for a person to price, sell and deliver; `--revenue-command`
+is how the money that actually arrived gets back into the loop. Every claim
+about earning in this section runs through a human, deliberately: an agent
+whose survival depends on income is the last thing that should be handed a
+payment rail, a mailing list or a marketplace login. Note also that many
+marketplaces' terms restrict undisclosed automated work — that is your call
+to make, with your name on it.
+
+The honesty rules live in the fixed part of the prompt (`economy.BASE_SYSTEM`):
+original, truthful, no impersonation, no invented credentials, testimonials or
+statistics, and refuse the brief rather than fake it. Only the tactics pool
+evolves, so nothing the lineage discovers can repeal them.
+
+### What "keeping itself running" actually optimises
+
+Score is `quality - 0.25 x (cycle cost / $0.05)`. So at equal quality, the
+cheaper generation wins, and the lineage genuinely evolves toward covering its
+own costs — shorter outputs, lower effort, fewer wasted tokens. Cache hits are
+free and are not charged, so a repeated genome costs nothing to re-prove.
+
+Prices come from a table in `selfmod/economy.py` ($5/$25 per million tokens
+for Opus 5), overridable with `SELFMOD_PRICE_IN` / `SELFMOD_PRICE_OUT` — set
+those alongside `SELFMOD_LLM_BACKEND=simulated` to watch a bankruptcy happen
+for free. The spend ledger (`workspace/spend.jsonl`) sits above the
+generations, so a generation deleting itself cannot erase the record of what
+it spent. A revenue command that fails or prints no number **abstains** rather
+than reporting zero — being unable to read the balance is not the same as
+being broke, and the difference here is deletion.
 
 ## Giving it one instruction: `do`
 
@@ -409,15 +484,15 @@ grader out of the model's reach, as `llm` does.
 $ cd agent && python3 -m unittest discover -s tests -t .
 ```
 
-104 tests, standard library only, and **no test calls the API** — the suite
+128 tests, standard library only, and **no test calls the API** — the suite
 forces the simulated backend in `tests/__init__.py`. They cover the
 containment rules (escape via `..`, via symlink, via a forged marker outside
 the workspace, and deletion of the root itself are each refused), the genome
 rewrite including the prompt gene, mutation bounds and seed stability, task
 determinism, the reply cache and call budget, abstention deleting nothing,
 every rejection the question-file parser can raise, every mission check
-including the shell one, a mission nobody can satisfy leaving nothing behind,
-and
+including the shell one, a mission nobody can satisfy leaving nothing behind, token pricing,
+bankruptcy deleting a generation while its spend ledger survives, and
 the full lifecycle end to end with real subprocesses and real deletions —
 upgrade, rejection, self-destruction, rollback to parent, extinction, and a
 head too broken to run.
@@ -436,6 +511,7 @@ agent/
     llm_task.py      the Claude task whose system prompt is part of the genome
     promptpack.py    reads the plain-text question file `new` and `check` write
     mission.py       `do` mode: one instruction, deterministic checks, a judge
+    economy.py       `earn` mode: token pricing, spend ledger, revenue, solvency
     llm.py           the API backend, reply cache, call budget and offline stand-in
     errors.py        TaskUnavailable: could not be judged, so nothing is deleted
     orchestrator.py  seeding, running the head, evolving, status

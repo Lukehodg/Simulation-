@@ -16,6 +16,7 @@ from pathlib import Path
 import os
 
 from . import agent as agent_mod
+from . import economy
 from . import genome, lineage, llm, mission as mission_mod
 from . import orchestrator, promptpack, tasks
 
@@ -96,6 +97,33 @@ def build_parser() -> argparse.ArgumentParser:
     p_do.add_argument("--show", action="store_true",
                       help="print the mission and stop, without running it")
 
+    p_earn = sub.add_parser(
+        "earn", help="produce sellable work and stay solvent, or self-delete")
+    p_earn.add_argument("brief", help="what to produce each cycle, for you to sell")
+    p_earn.add_argument("--stake", type=float, default=5.0,
+                        help="money you have put in, in your own units "
+                             "(default 5)")
+    p_earn.add_argument("--revenue-command", default="", metavar="CMD",
+                        help="a command printing total money received so far, "
+                             "e.g. 'cat revenue.txt' or a Stripe balance call")
+    p_earn.add_argument("--deliverables", default="deliverables", metavar="DIR",
+                        help="where finished work is written for you to sell")
+    p_earn.add_argument("--must-contain", action="append", metavar="TEXT")
+    p_earn.add_argument("--must-not-contain", action="append", metavar="TEXT")
+    p_earn.add_argument("--max-words", type=int, metavar="N")
+    p_earn.add_argument("--min-words", type=int, metavar="N")
+    p_earn.add_argument("--matches", action="append", metavar="REGEX")
+    p_earn.add_argument("--json-output", action="store_true")
+    p_earn.add_argument("--check-command", action="append", metavar="CMD")
+    p_earn.add_argument("--quality-at", type=float, default=1.0, metavar="F",
+                        help="fraction of the checks the work must pass "
+                             "(default 1.0)")
+    p_earn.add_argument("--cycles", type=int, default=8)
+    p_earn.add_argument("--workspace")
+    p_earn.add_argument("--dry-run", action="store_true")
+    p_earn.add_argument("--show", action="store_true",
+                        help="print the plan and stop")
+
     p_new = sub.add_parser("new", help="write a question file, by interview")
     p_new.add_argument("--output", default="prompt.txt",
                        help="where to write it (default: prompt.txt)")
@@ -138,14 +166,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _cost_notice(task: str, cycles: int) -> None:
     """Say what a run will cost before it starts spending."""
-    if task not in ("llm", "mission"):
+    if task not in ("llm", "mission", "earn"):
         return
     backend = os.environ.get(llm.ENV_BACKEND, "anthropic").strip().lower()
     if backend != "anthropic":
         print(f"note: the {task} task is on the {backend} backend — "
               f"no API calls")
         return
-    if task == "mission":
+    if task in ("mission", "earn"):
         per_cycle = 4 if getattr(_cost_notice, "judged", False) else 2
     else:
         from .llm_task import suite
@@ -309,8 +337,67 @@ def _do(args) -> int:
     return 0
 
 
+def _earn(args) -> int:
+    """Set a funding plan, then run the lineage until it earns or goes broke."""
+    workspace = _workspace(args)
+    plan = economy.Plan(
+        brief=args.brief,
+        stake=args.stake,
+        revenue_command=args.revenue_command,
+        checks=mission_mod.parse_cli_checks(args),
+        quality_at=max(0.0, min(1.0, args.quality_at)),
+        deliverables=str(Path(args.deliverables).expanduser().resolve()),
+    )
+    print(plan.describe())
+    print()
+    if not plan.revenue_command:
+        print("No revenue command given, so nothing can ever come in: this "
+              "run can only spend the stake down and die. That is a fine way "
+              "to see the mechanism, but point --revenue-command at a real "
+              "balance to use it for anything.")
+        print()
+    if args.show:
+        return 0
+
+    workspace.mkdir(parents=True, exist_ok=True)
+    os.environ[economy.ENV_PLAN] = str(plan.save(workspace / "plan.json"))
+    os.environ["SELFMOD_WORKSPACE"] = str(workspace)
+
+    _cost_notice("earn", args.cycles)
+    orchestrator.init(workspace, force=True)
+
+    def report(index, outcome):
+        print(f"cycle {index + 1}: {_describe(outcome)}")
+
+    orchestrator.evolve(workspace, cycles=args.cycles, task="earn", seed=7,
+                        armed=not args.dry_run, on_step=report)
+    print()
+    print(lineage.Ledger(workspace).render_tree())
+    print()
+
+    spent = economy.SpendLedger(workspace).total()
+    head = lineage.Ledger(workspace).head()
+    print(f"spent so far: {spent:.4f}  (ledger: {workspace / 'spend.jsonl'})")
+    if head is None:
+        print("Bankrupt or failing its own quality bar: the last generation "
+              "deleted itself and the lineage is extinct.")
+        return 1
+    print(f"still running: {head.name} (score {head.score})")
+    print(f"work to sell:  {plan.deliverables}")
+    return 0
+
+
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
+    # Commands the user supplies run where the user is, not in the workspace.
+    os.environ.setdefault(mission_mod.ENV_CWD, os.getcwd())
+
+    if args.command == "earn":
+        try:
+            return _earn(args)
+        except (economy.PlanError, mission_mod.MissionError) as exc:
+            print(f"That plan cannot be run as written:\n  {exc}")
+            return 1
 
     if args.command == "do":
         try:

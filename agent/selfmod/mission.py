@@ -29,6 +29,14 @@ from .tasks import Task, Verdict
 
 ENV_MISSION = "SELFMOD_MISSION"
 
+#: The directory the person was standing in when they typed the command, so
+#: their own shell commands see the paths they meant.
+ENV_CWD = "SELFMOD_CWD"
+
+
+def user_cwd() -> str | None:
+    return os.environ.get(ENV_CWD) or None
+
 #: Tactics the agent may put in its own prompt. Unlike the question-set task
 #: these are about *doing as told*, not about formatting an answer.
 CLAUSES: tuple[str, ...] = (
@@ -125,7 +133,7 @@ class Check:
             command = self.value.replace("{output}", str(path))
             try:
                 done = subprocess.run(command, shell=True, capture_output=True,
-                                      text=True, timeout=60)
+                                      text=True, timeout=60, cwd=user_cwd())
             except subprocess.TimeoutExpired:
                 return False, "check command timed out"
             except OSError as exc:
@@ -224,7 +232,8 @@ class SimulatedBackend(Backend):
         text = f"[simulated reply to] {body}"
         if not brief:
             text += " — with some extra commentary that a real model might add."
-        return Reply(text=text, output_tokens=20 + 8 * len(text.split()))
+        return Reply(text=text, output_tokens=20 + 8 * len(text.split()),
+                     input_tokens=12 + 2 * len(system.split()) + len(user.split()))
 
 
 # --------------------------------------------------------------------------

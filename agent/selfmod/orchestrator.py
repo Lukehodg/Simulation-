@@ -103,6 +103,7 @@ def run_cycle(workspace: Path, *, task: str = "pathfind", seed: int = 7,
     # One cache for the whole lineage, kept above the generations so it
     # survives them: an unchanged genome re-proves itself for free.
     env.setdefault(llm.ENV_CACHE, str(workspace / "llm-cache"))
+    env["SELFMOD_WORKSPACE"] = str(workspace)
     argv = [sys.executable, "-m", "selfmod", "cycle",
             "--home", str(home), "--workspace", str(workspace),
             "--task", task, "--seed", str(seed), "--cycle", str(cycle)]

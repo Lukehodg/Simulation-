@@ -44,6 +44,7 @@ class Reply:
     output_tokens: int = 0
     refused: bool = False
     cached: bool = False
+    input_tokens: int = 0
 
 
 class Budget:
@@ -85,13 +86,14 @@ class Cache:
         except (OSError, json.JSONDecodeError):
             return None
         return Reply(payload.get("text", ""), payload.get("output_tokens", 0),
-                     payload.get("refused", False), cached=True)
+                     payload.get("refused", False), cached=True,
+                     input_tokens=payload.get("input_tokens", 0))
 
     def put(self, key: str, reply: Reply) -> None:
         if not self.directory:
             return
         payload = {"text": reply.text, "output_tokens": reply.output_tokens,
-                   "refused": reply.refused}
+                   "refused": reply.refused, "input_tokens": reply.input_tokens}
         tmp = self.directory / f"{key}.json.tmp"
         tmp.write_text(json.dumps(payload), encoding="utf-8")
         tmp.replace(self.directory / f"{key}.json")
@@ -162,7 +164,8 @@ class AnthropicBackend(Backend):
         text = "".join(
             block.text for block in response.content if block.type == "text"
         )
-        return Reply(text=text, output_tokens=response.usage.output_tokens)
+        return Reply(text=text, output_tokens=response.usage.output_tokens,
+                     input_tokens=response.usage.input_tokens)
 
 
 class Client:
@@ -177,12 +180,15 @@ class Client:
         self.calls = 0
         self.cache_hits = 0
         self.output_tokens = 0
+        self.input_tokens = 0
 
     def ask(self, *, system: str, user: str, effort: str, max_tokens: int) -> Reply:
         key = Cache.key(backend=self.backend.name, model=self.model, system=system,
                         user=user, effort=effort, max_tokens=max_tokens)
         hit = self.cache.get(key)
         if hit is not None:
+            # A cached reply is free: it is not charged, and not counted
+            # toward spend.
             self.cache_hits += 1
             self.output_tokens += hit.output_tokens
             return hit
@@ -192,6 +198,7 @@ class Client:
                                       max_tokens=max_tokens)
         self.calls += 1
         self.output_tokens += reply.output_tokens
+        self.input_tokens += reply.input_tokens
         self.cache.put(key, reply)
         return reply
 
