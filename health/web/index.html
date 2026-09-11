@@ -170,6 +170,116 @@ function bloods(data) {
   return box;
 }
 
+/* ---------- readiness, protocol, check-in, experiments ---------- */
+function protocolBanner(protocol) {
+  if (!protocol || !protocol.on || !protocol.on.length) return null;
+  const box = el("div", "banner");
+  const pills = protocol.on.map(a => {
+    const dose = (a.weekly_dose !== null && a.weekly_dose !== undefined)
+      ? `${a.weekly_dose}${a.unit || ""}/wk` : "";
+    return `${a.label} ${dose} · wk ${Math.round(a.weeks_on)}`;
+  }).join(" · ");
+  box.innerHTML = `<span class="tag">on</span> ${pills}`;
+  return box;
+}
+
+function illnessAlert(watch) {
+  if (!watch || watch.flag !== "watch") return null;
+  const box = el("div", "alert");
+  box.textContent = `⚠ ${watch.note}`;
+  return box;
+}
+
+function readinessSection(readiness) {
+  if (!readiness || !readiness.recommendation) return null;
+  const box = el("section");
+  const cls = { push: "good", proceed: "ink", hold: "warn", pull_back: "bad" }
+    [readiness.recommendation] || "ink";
+  const head = el("div", "head");
+  head.appendChild(el("h3", null, "Readiness"));
+  head.appendChild(el("div", `call ${cls}`, readiness.recommendation.replace("_", " ")));
+  box.appendChild(head);
+  box.appendChild(el("p", "caption", readiness.advice || ""));
+  const reasons = (readiness.reasons || []).concat(readiness.context || []);
+  reasons.forEach(r => box.appendChild(el("p", "caption", "— " + r)));
+  return box;
+}
+
+function sixWeekTrends(trends) {
+  if (!trends || !trends.length) return null;
+  const box = el("div");
+  box.appendChild(el("div", "colhead", "Six-week drift"));
+  trends.forEach(t => {
+    const row = el("div", "row");
+    row.appendChild(el("div", "name", t.metric.replace(/_/g, " ")));
+    const cls = t.verdict === "rising" ? "up" : t.verdict === "falling" ? "down" : "flat";
+    row.appendChild(el("div", "fig",
+      `<span class="${cls}">${t.verdict}</span> · ${fmt(t.slope_per_week, 3)}/wk`));
+    box.appendChild(row);
+  });
+  return box;
+}
+
+function sleepArchitecture(arch) {
+  if (!arch || !arch.components) return null;
+  const shown = arch.components.filter(c => c.last_night !== null && c.last_night !== undefined);
+  if (!shown.length) return null;
+  const box = el("div");
+  box.appendChild(el("div", "colhead", "Sleep architecture"));
+  shown.forEach(c => {
+    const row = el("div", "row");
+    row.appendChild(el("div", "name", c.label));
+    const cls = c.verdict === "ordinary" ? "flat" : (c.verdict === "high" ? "up" : "down");
+    row.appendChild(el("div", "fig", `${fmt(c.last_night)} <span class="${cls}">` +
+      `${c.z !== null && c.z !== undefined ? (c.z > 0 ? "+" : "") + c.z.toFixed(1) + " SD" : "—"}</span>`));
+    box.appendChild(row);
+  });
+  if (arch.deep_sleep_debt_min) {
+    box.appendChild(el("p", "caption",
+      `deep-sleep debt ${fmt(arch.deep_sleep_debt_min, 0)} min over the window`));
+  }
+  return box;
+}
+
+function checkinSection(checkin, bp) {
+  const rows = (checkin && checkin.rows) || [];
+  if (!rows.length && !(bp && bp.verdict)) return null;
+  const box = el("div");
+  box.appendChild(el("div", "colhead", "Check-in"));
+  if (bp && bp.verdict) {
+    const row = el("div", "row");
+    row.appendChild(el("div", "name", "Blood pressure"));
+    const cls = bp.verdict === "see a doctor" ? "high" : bp.verdict === "watch" ? "low" : "";
+    const tag = cls ? `<span class="tag ${cls}">${bp.verdict}</span>` : bp.verdict;
+    row.appendChild(el("div", "fig",
+      `${fmt(bp.average_systolic, 0)}/${fmt(bp.average_diastolic, 0)} ${tag}`));
+    box.appendChild(row);
+  }
+  rows.forEach(r => {
+    const row = el("div", "row");
+    row.appendChild(el("div", "name", r.dimension));
+    const cls = r.agreement === "match" ? "flat" : "down";
+    row.appendChild(el("div", "fig", `${r.you_said}/5 <span class="${cls}">${r.agreement}</span>`));
+    box.appendChild(row);
+  });
+  if (checkin && checkin.note) box.appendChild(el("p", "caption", `"${checkin.note}"`));
+  return box;
+}
+
+function experimentsStrip(experiments) {
+  if (!experiments || !experiments.length) return null;
+  const box = el("div");
+  box.appendChild(el("div", "colhead", "Experiments"));
+  experiments.forEach(e => {
+    const row = el("div", "row");
+    row.appendChild(el("div", "name", `${e.hypothesis} <em>· ${e.status}</em>`));
+    row.appendChild(el("div", "fig", e.condition
+      ? `${e.condition} · day ${e.day_in_block}/${e.block_days}` : "—"));
+    box.appendChild(row);
+  });
+  return box;
+}
+
 function setup(sync) {
   const box = el("div", "setup");
   box.appendChild(el("h2", null, "Nothing synced yet."));
@@ -219,6 +329,11 @@ function render(data) {
       `Nothing has synced for today — showing ${data.showing_older_day}, the most recent day with data.`));
   }
 
+  const banner = protocolBanner(data.protocol);
+  if (banner) body.appendChild(banner);
+  const alertBox = illnessAlert(data.illness_watch);
+  if (alertBox) body.appendChild(alertBox);
+
   const verdict = el("div", "verdict");
   const left = el("div");
   left.appendChild(el("h2", null, data.verdict.headline));
@@ -234,6 +349,9 @@ function render(data) {
 
   body.appendChild(readout(data.readout.filter(r => r.metric !== "recovery_score"), data.load));
 
+  const readinessBox = readinessSection(data.readiness);
+  if (readinessBox) body.appendChild(readinessBox);
+
   const strip = el("section");
   const head = el("div", "head");
   head.appendChild(el("h3", null, `${data.chart.metric} · ${data.chart.points.length} days against baseline`));
@@ -246,6 +364,24 @@ function render(data) {
     ? `Band is the ${data.chart.points.length}-day median ±1 MAD. The day being judged is not part of its own baseline.`
     : "Not enough history for a baseline band yet."));
   body.appendChild(strip);
+
+  const trendsBox = sixWeekTrends(data.six_week_trends);
+  const sleepBox = sleepArchitecture(data.sleep_architecture);
+  if (trendsBox || sleepBox) {
+    const driftCols = el("section", "cols");
+    if (trendsBox) driftCols.appendChild(trendsBox);
+    if (sleepBox) driftCols.appendChild(sleepBox);
+    body.appendChild(driftCols);
+  }
+
+  const checkinBox = checkinSection(data.check_in, data.blood_pressure);
+  const expBox = experimentsStrip(data.experiments);
+  if (checkinBox || expBox) {
+    const noteCols = el("section", "cols");
+    if (checkinBox) noteCols.appendChild(checkinBox);
+    if (expBox) noteCols.appendChild(expBox);
+    body.appendChild(noteCols);
+  }
 
   const cols = el("section", "cols");
   cols.appendChild(strength(data.strength));

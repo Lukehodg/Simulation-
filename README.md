@@ -32,15 +32,14 @@ Built and tested:
 | **Check-in** | Daily blood pressure (averaged, trended, escalated) and how you feel — read against the computed state, not just logged |
 | **Experiments** | Pre-registered n-of-1 trials — an exact permutation test over alternating blocks, with its own p-value floor always reported |
 | **Brief** | `health brief` — the day (or the week) read back to you in two paragraphs, on a schedule if you want it |
-| **Agent tools** | 34 MCP tools — the surface Claude actually talks to |
+| **Agent tools** | 35 MCP tools — the surface Claude actually talks to |
 | **Interface** | A local page on 127.0.0.1, served from the same database |
 | **Bloods page** | Drop a report in, see what is flagged, ask Claude to read it |
 | **Indicators** | Per-domain status with the evidence behind each — deliberately no single score |
 | **Training observations** | Stalled, dormant, progressing and imbalanced, computed from your sets |
 
-Next: the Garmin export and `.FIT` parsers, energy availability (which needs
-Garmin's expenditure data), and a local dashboard refresh to match everything
-above.
+Next: the Garmin export and `.FIT` parsers, and energy availability (which
+needs Garmin's expenditure data).
 
 ## Setup
 
@@ -384,6 +383,7 @@ compare draws from the same phase, not this series
 ```sh
 health research "creatine supplementation women"
 health research --analyte ferritin --context "endurance athletes"
+health research --weekly
 ```
 
 Searches Europe PMC — open, keyless, indexes MEDLINE and preprints — and
@@ -392,6 +392,15 @@ DOI. Results are ordered by design rather than citations, since a meta-analysis
 outranks a more-cited narrative review. Searching `--analyte` uses your own
 most recent result and its direction, because the literature on *low* ferritin
 and the literature on *high* ferritin are different literatures.
+
+`--weekly` picks the week's single most notable pattern for you — strongest
+evidence first: a completed pre-registered experiment, then a compound
+monitoring marker actually moving, then the strongest recovery driver, then
+the strongest six-week trend — and searches around that. The same selection
+feeds `health brief --week`'s `weekly_research` block, so the brief cites
+whatever this would have found, under the same rule the bloods reader already
+holds: retrieval, not a verdict — a paper about caffeine and HRV in general
+does not prove what happened in your week.
 
 It retrieves and labels evidence; it does not interpret it. A citation count is
 popularity and a publication type is a design, and neither is a verdict on
@@ -443,16 +452,19 @@ someone else wrote, and `../` is a legal one.
 health serve          # opens http://127.0.0.1:8899
 ```
 
-One page: the day's verdict, a readout row with each metric's deviation from
-its own baseline, HRV against its baseline band with the current cycle phase
-shaded, strength trends with their fit, and whatever your last blood panel
-flagged.
+One page: a protocol banner and illness-watch alert where relevant, the day's
+verdict, a readout row with each metric's deviation from its own baseline, the
+readiness call with its reasons, HRV against its baseline band with the
+current cycle phase shaded, six-week drift and sleep architecture, your
+check-in and blood pressure, any running experiment, strength trends with
+their fit, and whatever your last blood panel flagged.
 
 It is deliberately a readout rather than a dashboard — rules instead of cards,
 monospaced figures aligned so a column reads at a glance, and uncertainty
 printed next to the figure it qualifies rather than hidden behind a tooltip.
-The verdict line describes what the numbers did; it does not tell you what to
-do about it, because that is not a judgement this data can make on its own.
+The verdict line describes what the numbers did, not what to do about it —
+that judgement is what the readiness section is for, and it says so with the
+same reasons `health brief` and the agent read from.
 
 Before anything is connected it renders a setup checklist with the exact
 command for each source, since an empty database is the first thing you will
@@ -604,7 +616,7 @@ the agent:
 claude mcp add health -- /path/to/.venv/bin/health mcp --root /path/to/project
 ```
 
-That exposes 34 tools — baselines, deviations, correlations, training load,
+That exposes 35 tools — baselines, deviations, correlations, training load,
 lift progression, cycle phase, blood results, literature search, the readiness
 call and its cross-domain siblings, and a daily brief that pulls them together.
 Then you can just ask:

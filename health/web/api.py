@@ -14,9 +14,15 @@ from typing import Any
 from .. import metrics as M
 from ..analytes import ANALYTES
 from ..config import Config
+from ..features import checkin as checkin_features
 from ..features import cycle as cycle_features
 from ..features import daily, labs as lab_features
+from ..features import experiment as experiment_features
+from ..features import protocol as protocol_features
+from ..features import readiness as readiness_features
+from ..features import sleep as sleep_features
 from ..features import strength as strength_features
+from ..features import trend as trend_features
 from ..store import Store
 
 #: What the readout row shows, in order.
@@ -70,6 +76,20 @@ def _verdict(store: Store, day: date, metrics: dict[str, float],
     return {"headline": f"{len(unexplained)} off baseline.",
             "detail": f"{names} is outside its own recent range. One day is not "
                       f"a trend — worth watching rather than acting on."}
+
+
+def _experiments_summary(store: Store, day: date) -> list[dict[str, Any]]:
+    out = []
+    for exp in experiment_features.all_experiments(store):
+        block = experiment_features.current_block(exp, as_of=day)
+        out.append({
+            "id": exp.id, "hypothesis": exp.hypothesis,
+            "status": experiment_features.status(exp, as_of=day),
+            "condition": block.condition if block else None,
+            "day_in_block": (day - block.start).days + 1 if block else None,
+            "block_days": exp.block_days,
+        })
+    return out
 
 
 def today_payload(store: Store, config: Config, day: date | None = None) -> dict[str, Any]:
@@ -175,6 +195,14 @@ def today_payload(store: Store, config: Config, day: date | None = None) -> dict
             "metric": "HRV", "unit": "ms",
         },
         "cycle": {k: (str(v) if isinstance(v, date) else v) for k, v in cycle.items()},
+        "readiness": readiness_features.readiness(store, day).as_dict(),
+        "protocol": protocol_features.summary(store, today=day),
+        "illness_watch": readiness_features.illness_watch(store, as_of=day),
+        "six_week_trends": [t.as_dict() for t in trend_features.trends(store, as_of=day)],
+        "sleep_architecture": sleep_features.sleep_quality(store, as_of=day),
+        "check_in": checkin_features.subjective_vs_objective(store, day),
+        "blood_pressure": checkin_features.blood_pressure(store, as_of=day),
+        "experiments": _experiments_summary(store, day),
         "strength": progressions,
         "bloods": bloods,
         "sync": {"connected": connected, "last_ok": synced,

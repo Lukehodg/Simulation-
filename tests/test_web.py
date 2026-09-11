@@ -310,3 +310,28 @@ def test_the_draw_phase_is_shown_only_where_it_changes_the_reading(db, config):
     rows = {r["analyte"]: r for r in page["results"]}
     assert rows["oestradiol"]["phase"]        # varies with the cycle
     assert rows["ggt"]["phase"] is None       # does not
+
+
+def test_today_payload_carries_the_full_cross_domain_picture(db, config):
+    _seed(db)
+
+    payload = today_payload(db, config, day=TODAY)
+
+    assert payload["readiness"]["recommendation"] in ("push", "proceed", "hold", "pull_back")
+    assert "no_score" in payload["readiness"]
+    assert payload["protocol"]["on"] == []          # nothing logged in this fixture
+    assert payload["illness_watch"]["flag"] in ("watch", "clear")
+    assert isinstance(payload["six_week_trends"], list)
+    assert "nights" in payload["sleep_architecture"] or "note" in payload["sleep_architecture"]
+    assert "note" in payload["check_in"] or "rows" in payload["check_in"]
+    assert "note" in payload["blood_pressure"] or "verdict" in payload["blood_pressure"]
+    assert payload["experiments"] == []
+
+
+def test_an_empty_database_still_carries_the_new_keys_without_erroring(db, config):
+    payload = today_payload(db, config, day=TODAY)
+
+    assert payload["empty"] is True
+    for key in ("readiness", "protocol", "illness_watch", "six_week_trends",
+               "sleep_architecture", "check_in", "blood_pressure", "experiments"):
+        assert key in payload
