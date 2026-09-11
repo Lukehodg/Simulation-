@@ -246,5 +246,7 @@ def divergence_history(store: Store, days: int = 60,
         "energy_vs_hrv_same_day": same_day.describe(),
         "yesterdays_energy_vs_todays_hrv": energy_leads_hrv.describe(),
         "yesterdays_hrv_vs_todays_energy": hrv_leads_energy.describe(),
-        "note": "each is a hypothesis with its own interval, not a settled lead/lag",
+        "note": ("each is a hypothesis with its own interval, not a settled "
+                "lead/lag — `health experiment start` turns whichever looks "
+                "real into a pre-registered test"),
     }

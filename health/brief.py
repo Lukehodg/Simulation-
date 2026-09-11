@@ -26,6 +26,7 @@ from .config import Config
 from .features import daily, readiness
 from .features import checkin as checkin_features
 from .features import cycle as cycle_features
+from .features import experiment as experiment_features
 from .features import protocol as protocol_features
 from .features import sleep as sleep_features
 from .features import strength as strength_features
@@ -87,6 +88,16 @@ Ground rules:
   to medication. If `check_in` says nothing was logged today, you may mention
   it is missing but do not nag.
 
+- EXPERIMENTS. `running_experiments` is where you are in a pre-registered
+  n-of-1 trial — one line, a reminder, not a finding; mention it briefly if at
+  all. `experiment_results` is the actual output of `analyse()`: report the
+  pre-registered hypothesis, the exact test used, and always state the
+  p-value's floor alongside the p-value (a 6-block design cannot report better
+  than p=0.05 no matter the effect). Never call a result "significant" or
+  "proven" — the verdict field already gives you the honest wording, use it.
+  This is one person's twelve weeks, not a finding about anyone else; frame it
+  as something for them to decide with, not a general truth.
+
 - NO SCORE. Do not invent an overall readiness or health score, grade, or
   percentage. The readiness field is a recommendation with reasons; report it
   that way.
@@ -147,6 +158,41 @@ def _cycle_block(store: Store, day: date, deviations: list[tuple]) -> dict | Non
     return block
 
 
+def _running_experiments(store: Store, day: date) -> list[dict]:
+    """A one-line reminder for each trial with a block covering today — not a
+    report, just where you are in the schedule you pre-registered."""
+    out = []
+    for exp in experiment_features.all_experiments(store):
+        if experiment_features.status(exp, as_of=day) != "running":
+            continue
+        block = experiment_features.current_block(exp, as_of=day)
+        if not block:
+            continue
+        out.append({
+            "id": exp.id, "hypothesis": exp.hypothesis,
+            "day_in_block": (day - block.start).days + 1, "block_days": exp.block_days,
+            "condition": block.condition,
+            "exposure": "yourself to log" if exp.exposure_type == "manual"
+                       else f"{exp.exposure_metric} {'>=' if block.condition == 'B' else '<'} "
+                            f"{exp.exposure_threshold:g}",
+        })
+    return out
+
+
+def _finished_experiment_analyses(store: Store, start: date, end: date) -> list[dict]:
+    """The full analysis for any trial that finished a block, or finished
+    entirely, inside this window — the weekly brief is where results land."""
+    out = []
+    for exp in experiment_features.all_experiments(store):
+        blocks = experiment_features.block_windows(exp)
+        finished_this_week = any(start <= b.end <= end for b in blocks)
+        just_completed = experiment_features.status(exp, as_of=end) == "complete" \
+            and blocks[-1].end <= end
+        if finished_this_week or just_completed:
+            out.append(experiment_features.analyse(store, exp, as_of=end))
+    return out
+
+
 def daily_payload(store: Store, day: date | None = None) -> dict[str, Any]:
     """Everything the daily brief is written from, and nothing else."""
     day = day or date.today()
@@ -180,6 +226,10 @@ def daily_payload(store: Store, day: date | None = None) -> dict[str, Any]:
     bp = checkin_features.blood_pressure(store, as_of=day)
     if bp.get("verdict"):
         payload["blood_pressure"] = bp
+
+    running = _running_experiments(store, day)
+    if running:
+        payload["running_experiments"] = running
     return payload
 
 
@@ -199,7 +249,7 @@ def weekly_payload(store: Store, end: date | None = None) -> dict[str, Any]:
     load_now = daily.training_load(store, as_of=end)
     load_prev = daily.training_load(store, as_of=start - timedelta(days=1))
 
-    return {
+    payload = {
         "week": f"{start} to {end}",
         "daily_series": {k: v for k, v in series.items() if v},
         "training_load_now": load_now.describe(),
@@ -222,6 +272,13 @@ def weekly_payload(store: Store, end: date | None = None) -> dict[str, Any]:
         "blood_pressure": checkin_features.blood_pressure(store, as_of=end),
         "divergence_history": checkin_features.divergence_history(store, as_of=end),
     }
+    running = _running_experiments(store, end)
+    if running:
+        payload["running_experiments"] = running
+    finished = _finished_experiment_analyses(store, start, end)
+    if finished:
+        payload["experiment_results"] = finished
+    return payload
 
 
 def generate(store: Store, config: Config, span: str = "today",

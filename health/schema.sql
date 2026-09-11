@@ -198,6 +198,43 @@ CREATE TABLE IF NOT EXISTS checkins (
     PRIMARY KEY (source, local_date)
 );
 
+-- A pre-registered n-of-1 trial. `start` is written once and is immutable
+-- except for a `stop` — the whole point of pre-registration is that the
+-- design cannot be reshaped once the data starts arriving. The block schedule
+-- itself is never stored: it is a pure function of this row, computed by
+-- `health.features.experiment`.
+CREATE TABLE IF NOT EXISTS experiment_events (
+    source              VARCHAR NOT NULL,   -- 'experiment'
+    local_date          DATE    NOT NULL,   -- when the event was recorded
+    event               VARCHAR NOT NULL,   -- start | stop
+    experiment_id       VARCHAR NOT NULL,
+    hypothesis          VARCHAR,
+    exposure_type       VARCHAR,            -- manual | metric_threshold
+    exposure_metric     VARCHAR,
+    exposure_threshold  DOUBLE,
+    outcome_metric      VARCHAR,
+    predicted_direction VARCHAR,            -- raises | lowers
+    block_days          INTEGER,
+    blocks_planned      INTEGER,
+    start_date          DATE,               -- first day of block 0
+    starting_condition  VARCHAR,            -- A (control) | B (exposed)
+    reason              VARCHAR,            -- for a stop event
+    ingested_at         TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (source, experiment_id, event)
+);
+
+-- Daily adherence for a `manual` exposure only — assumed true unless a miss is
+-- logged, so a day with nothing here still counts (intention-to-treat).
+CREATE TABLE IF NOT EXISTS experiment_adherence (
+    source          VARCHAR NOT NULL,
+    experiment_id   VARCHAR NOT NULL,
+    local_date      DATE    NOT NULL,
+    adhered         BOOLEAN NOT NULL,
+    note            VARCHAR,
+    ingested_at     TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (source, experiment_id, local_date)
+);
+
 -- Derived: one row per day of every cycle we can reconstruct. Rebuilt from
 -- cycle_events by `health.features.cycle.rebuild`, never written by a source.
 CREATE TABLE IF NOT EXISTS cycle_days (

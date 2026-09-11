@@ -30,15 +30,17 @@ Built and tested:
 | **Drift & sleep** | Six-week trend detection (is the baseline itself moving), sleep architecture vs. your own baseline, an illness early-warning from resting HR + respiration + skin temp |
 | **Protocol** | Compounds you're on as an axis of interpretation — documented effects, monitoring markers, pre-panel checklist; escalation, never dosing |
 | **Check-in** | Daily blood pressure (averaged, trended, escalated) and how you feel — read against the computed state, not just logged |
+| **Experiments** | Pre-registered n-of-1 trials — an exact permutation test over alternating blocks, with its own p-value floor always reported |
 | **Brief** | `health brief` — the day (or the week) read back to you in two paragraphs, on a schedule if you want it |
-| **Agent tools** | 32 MCP tools — the surface Claude actually talks to |
+| **Agent tools** | 34 MCP tools — the surface Claude actually talks to |
 | **Interface** | A local page on 127.0.0.1, served from the same database |
 | **Bloods page** | Drop a report in, see what is flagged, ask Claude to read it |
 | **Indicators** | Per-domain status with the evidence behind each — deliberately no single score |
 | **Training observations** | Stalled, dormant, progressing and imbalanced, computed from your sets |
 
 Next: the Garmin export and `.FIT` parsers, energy availability (which needs
-Garmin's expenditure data), and n-of-1 experiment tracking.
+Garmin's expenditure data), and a local dashboard refresh to match everything
+above.
 
 ## Setup
 
@@ -259,6 +261,53 @@ them is the comparison that comes straight back after each entry — where how
 you feel and what the wearables say agree, and where they don't. Both
 directions are worth knowing: fatigue the watch hasn't caught yet, or a green
 day that feels wrong for a reason nothing here measures.
+
+## Experiments
+
+`recovery_drivers` and the check-in's `divergence_history` both produce
+hypotheses and stop there — a correlation is a lead, not an answer.
+`health experiment` is where a lead becomes one: pre-register a hypothesis and
+an exact block schedule before any data exists, then let it run.
+
+```sh
+health experiment start "late caffeine and HRV" \
+  --exposure caffeine --exposure-threshold 1 --outcome hrv_rmssd \
+  --direction lowers --blocks 6 --block-days 14
+```
+
+prints the whole 12-week calendar immediately — alternating 14-day blocks,
+control (**A**) and exposed (**B**), the starting condition randomised at
+registration so the schedule can't be shaped around what looks convenient.
+Nothing about the schedule is stored; it is computed fresh from that one
+pre-registration every time, so there is nothing to reshape later even if you
+wanted to.
+
+Two ways to vary the exposure. When it's already a logged metric — caffeine,
+alcohol, last-workout hour — `--exposure caffeine --exposure-threshold 1`
+reads it directly: no extra logging, each day's condition is just whichever
+side of the threshold that day's value fell on. For a habit nothing tracks
+yet:
+
+```sh
+health experiment start "magnesium before bed and deep sleep" \
+  --exposure manual --outcome sleep_duration --direction raises --blocks 6
+health experiment log            # today = adhered (the default assumption)
+health experiment log --miss     # forgot / skipped today
+health experiment status         # where you are in the schedule
+```
+
+At the end (or any time after two completed blocks of each condition),
+`health experiment analyse <id>` runs an **exact permutation test** over the
+blocks' outcome medians — the right test for a handful of blocks, because it
+makes no distributional assumption and its own limit is exact rather than
+estimated: a 6-block design (3 vs 3) cannot report better than p=0.05 no
+matter how strong the true effect, and a 4-block one cannot do better than
+p≈0.17. That floor is always reported next to the p-value, the same honesty
+`trend.py` applies to autocorrelation — the verdict is one of *"an effect in
+the predicted direction"*, *"a trend … not distinguishable from chance with
+this many blocks"*, or *"no support for the predicted direction"*, never
+"significant" or "proven". A result here is this one person's twelve weeks,
+not a finding about anyone else.
 
 ## Blood tests
 
@@ -555,7 +604,7 @@ the agent:
 claude mcp add health -- /path/to/.venv/bin/health mcp --root /path/to/project
 ```
 
-That exposes 32 tools — baselines, deviations, correlations, training load,
+That exposes 34 tools — baselines, deviations, correlations, training load,
 lift progression, cycle phase, blood results, literature search, the readiness
 call and its cross-domain siblings, and a daily brief that pulls them together.
 Then you can just ask:

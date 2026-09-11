@@ -519,10 +519,11 @@ def recovery_drivers(store: Store, targets: tuple[str, ...] = (M.HRV_RMSSD,
         "caveat": (f"{comparisons} pairs were tested; with that many, one or two "
                    "will clear an interval by chance. Treat each as a "
                    "hypothesis."),
-        "next_step": ("to test one: pick the input, alternate two-week blocks "
-                      "of high and low, and compare the target between blocks — "
-                      "state the metric first so the result is not chosen after "
-                      "the fact"),
+        "next_step": ("to test one properly: `health experiment start "
+                      "\"<hypothesis>\" --exposure <input> --outcome <target> "
+                      "--direction raises|lowers` pre-registers the comparison "
+                      "before any data exists, so the result can't be chosen "
+                      "after the fact"),
     }
 
 

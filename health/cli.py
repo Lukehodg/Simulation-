@@ -14,6 +14,7 @@
     health cycle [--metric M]   where you are, and how a metric moves by phase
     health protocol [add ...]   what you're on, as context for the analysis
     health checkin [--bp S/D]   blood pressure and how you feel, vs the numbers
+    health experiment start ... pre-register an n-of-1 trial and test it
     health lifts [EXERCISE]     strength progression, or one exercise's history
     health volume [--weeks N]   weekly tonnage by muscle group
     health sql "SELECT ..."     ask the database directly
@@ -278,6 +279,147 @@ def cmd_checkin(args, config) -> int:
               f"today — {bp['verdict']}")
         if bp.get("note"):
             print(f"  {bp['note']}")
+    return 0
+
+
+def _print_experiment_calendar(exp) -> None:
+    from .features import experiment as experiment_features
+
+    print(f"{exp.id}: {exp.hypothesis}")
+    print(f"  {exp.outcome_metric} predicted to {exp.predicted_direction[:-1]} "
+         f"when exposed ({exp.exposure_metric or 'manual'})")
+    print(f"  {exp.blocks_planned} blocks x {exp.block_days} days, "
+         f"starting {exp.starting_condition} ({exp.start_date})")
+    print()
+    for block in experiment_features.block_windows(exp):
+        print(f"  block {block.index}  {block.condition}  {block.start} to {block.end}")
+    last = experiment_features.block_windows(exp)[-1]
+    print(f"\nfinishes {last.end}. `health experiment analyse {exp.id}` once enough "
+         f"blocks are in.")
+
+
+def cmd_experiment(args, config) -> int:
+    import random
+
+    from .features import experiment as experiment_features
+
+    if args.action == "start":
+        if not args.target:
+            raise SystemExit("give a hypothesis, e.g. "
+                             "health experiment start \"late caffeine and HRV\" ...")
+        exposure_type = "manual" if args.exposure in (None, "manual") else "metric_threshold"
+        spec = {
+            "hypothesis": args.target,
+            "experiment_id": args.id,
+            "exposure_type": exposure_type,
+            "exposure_metric": None if exposure_type == "manual" else args.exposure,
+            "exposure_threshold": args.exposure_threshold,
+            "outcome_metric": args.outcome,
+            "predicted_direction": args.direction,
+            "block_days": args.block_days,
+            "blocks_planned": args.blocks,
+            "starting_condition": args.start_with or random.choice(["A", "B"]),
+            "start_date": str(args.since or date.today()),
+        }
+        from .sources.experiment import slug as slug_id
+
+        experiment_id = args.id or slug_id(args.target)
+        spec["experiment_id"] = experiment_id
+        config.ensure_dirs()
+        source = build_source("experiment", config)
+        try:
+            landed = source.start(spec)
+        except ValueError as exc:
+            raise SystemExit(str(exc))
+        with _store(config) as store:
+            store.load(source.parse(landed))
+            store.record_raw(landed, "experiment", "event",
+                             datetime.now(timezone.utc), parsed=True)
+            exp = experiment_features.load(store, experiment_id)
+        if exp:
+            _print_experiment_calendar(exp)
+        return 0
+
+    if args.action == "log":
+        with _store(config, read_only=True) as store:
+            running = [e for e in experiment_features.all_experiments(store)
+                      if e.exposure_type == "manual"
+                      and experiment_features.status(e) == "running"]
+        target = args.target
+        if not target:
+            if len(running) != 1:
+                raise SystemExit("give the experiment id — more than one (or zero) "
+                                 "manual experiments are running")
+            target = running[0].id
+        source = build_source("experiment", config)
+        landed = source.log(target, str(date.today()), adhered=not args.miss,
+                            note=args.note)
+        with _store(config) as store:
+            store.load(source.parse(landed))
+            store.record_raw(landed, "experiment", "adherence",
+                             datetime.now(timezone.utc), parsed=True)
+        print("missed" if args.miss else "logged: adhered")
+        return 0
+
+    if args.action == "stop":
+        if not args.target:
+            raise SystemExit("give the experiment id")
+        source = build_source("experiment", config)
+        landed = source.stop(args.target, args.reason)
+        with _store(config) as store:
+            store.load(source.parse(landed))
+            store.record_raw(landed, "experiment", "event",
+                             datetime.now(timezone.utc), parsed=True)
+        print(f"stopped {args.target}")
+        return 0
+
+    if args.action == "analyse" and not args.target:
+        raise SystemExit("give the experiment id — `health experiment list`")
+
+    with _store(config, read_only=True) as store:
+        if args.action == "list" or not args.target:
+            experiments = experiment_features.all_experiments(store)
+            if not experiments:
+                print("Nothing running. `health experiment start \"hypothesis\" "
+                     "--exposure ... --outcome ... --direction ...`")
+                return 0
+            for exp in experiments:
+                block = experiment_features.current_block(exp)
+                where = (f"block {block.index} ({block.condition}), "
+                        f"{(date.today() - block.start).days + 1}/{exp.block_days} days in"
+                        if block else "between blocks")
+                print(f"{exp.id:<28}{experiment_features.status(exp):<10}{where}")
+            return 0
+
+        exp = experiment_features.load(store, args.target)
+        if exp is None:
+            raise SystemExit(f"no experiment called {args.target!r} — "
+                             f"`health experiment list`")
+
+        if args.action == "analyse":
+            result = experiment_features.analyse(store, exp)
+            print(f"{exp.id}: {exp.hypothesis}")
+            print(f"blocks: {result['blocks_completed']}/{result['blocks_planned']} "
+                 f"completed, {result.get('blocks_usable', 0)} usable")
+            if result.get("test"):
+                t = result["test"]
+                print(f"{exp.outcome_metric} {t['observed_diff']:+.3g} "
+                     f"(exposed vs control); p={t['p']} "
+                     f"(n={t['n_permutations']} splits, floor {t['p_floor']})")
+            print(f"\n{result['verdict']}")
+            print(result["note"])
+            return 0
+
+        # bare `status <id>`
+        block = experiment_features.current_block(exp)
+        print(f"{exp.id}: {experiment_features.status(exp)}")
+        if block:
+            day_in_block = (date.today() - block.start).days + 1
+            print(f"block {block.index} ({block.condition}), day {day_in_block} "
+                 f"of {exp.block_days}")
+        for b in experiment_features.block_windows(exp):
+            marker = "*" if block and b.index == block.index else " "
+            print(f" {marker} block {b.index}  {b.condition}  {b.start} to {b.end}")
     return 0
 
 
@@ -914,6 +1056,34 @@ def build_parser() -> argparse.ArgumentParser:
                              help="show recent check-ins instead of logging one")
     checkin_cmd.add_argument("--days", type=int, default=14)
     checkin_cmd.set_defaults(fn=cmd_checkin)
+
+    experiment_cmd = sub.add_parser("experiment", help="pre-register an n-of-1 "
+                                                       "trial and test it")
+    experiment_cmd.add_argument("action", nargs="?", default="list",
+                                choices=["start", "log", "status", "list",
+                                        "analyse", "stop"])
+    experiment_cmd.add_argument("target", nargs="?",
+                                help="the hypothesis text (start) or an "
+                                     "experiment id (everything else)")
+    experiment_cmd.add_argument("--exposure", metavar="manual|METRIC",
+                                help="'manual' to log it yourself, or an "
+                                     "already-tracked metric")
+    experiment_cmd.add_argument("--exposure-threshold", type=float,
+                                help="exposed = metric >= this")
+    experiment_cmd.add_argument("--outcome", metavar="METRIC")
+    experiment_cmd.add_argument("--direction", choices=["raises", "lowers"])
+    experiment_cmd.add_argument("--block-days", type=int, default=14)
+    experiment_cmd.add_argument("--blocks", type=int, default=6)
+    experiment_cmd.add_argument("--start-with", choices=["A", "B"])
+    experiment_cmd.add_argument("--id", help="override the auto-generated id")
+    experiment_cmd.add_argument("--from", dest="since", metavar="YYYY-MM-DD",
+                                help="start date (default: today)")
+    experiment_cmd.add_argument("--miss", action="store_true",
+                                help="log (for adherence) that you did NOT keep "
+                                     "to today's condition")
+    experiment_cmd.add_argument("--note")
+    experiment_cmd.add_argument("--reason", help="why you're stopping it")
+    experiment_cmd.set_defaults(fn=cmd_experiment)
 
     research = sub.add_parser("research", help="search the literature")
     research.add_argument("query", nargs="?", help="what to search for")

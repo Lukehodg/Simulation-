@@ -29,6 +29,7 @@ from .config import Config, load_config
 from .features import checkin as checkin_features
 from .features import cycle as cycle_features
 from .features import daily, labs as lab_features
+from .features import experiment as experiment_features
 from .features import protocol as protocol_features
 from .features import readiness as readiness_features
 from .features import sleep as sleep_features
@@ -64,6 +65,10 @@ How to use them well:
   worse than the data, and feeling better than it — not just the alarming one.
   `blood_pressure`'s verdict of "see a doctor" is exactly that; never turn it
   into dosing advice.
+- `experiment_analysis` always returns its permutation test's p-value floor
+  alongside the p-value — report both. Never say "significant" or "proven";
+  use the `verdict` field's own wording. A result is this one person's twelve
+  weeks, not a general finding.
 - Never compare HRV across devices. WHOOP reports RMSSD, Apple reports SDNN,
   and they are stored under different metric names for that reason.
 - For anyone with a menstrual cycle, judge a reading with
@@ -504,6 +509,41 @@ def check_in(day: str | None = None, history: bool = False,
 def subjective_vs_objective(day: str | None = None) -> dict[str, Any]:
     with _store() as store:
         return checkin_features.subjective_vs_objective(store, _day(day))
+
+
+@server.tool(description="Every pre-registered n-of-1 trial and where it stands "
+                         "— which block, which condition, days remaining. Not "
+                         "the analysis; call experiment_analysis for that.")
+@guarded
+def experiments() -> dict[str, Any]:
+    with _store() as store:
+        out = []
+        for exp in experiment_features.all_experiments(store):
+            block = experiment_features.current_block(exp)
+            out.append({
+                "id": exp.id, "hypothesis": exp.hypothesis,
+                "status": experiment_features.status(exp),
+                "current_block": {"index": block.index, "condition": block.condition,
+                                  "start": str(block.start), "end": str(block.end)}
+                                 if block else None,
+                "outcome_metric": exp.outcome_metric,
+                "predicted_direction": exp.predicted_direction,
+            })
+        return {"experiments": out}
+
+
+@server.tool(description="The pre-registered comparison for one trial: block-"
+                         "level outcomes, the exact permutation test, its own "
+                         "p-value floor, and a verdict that is never "
+                         "'significant' or 'proven'. Personal to this one "
+                         "person's blocks, not a general finding.")
+@guarded
+def experiment_analysis(experiment_id: str) -> dict[str, Any]:
+    with _store() as store:
+        exp = experiment_features.load(store, experiment_id)
+        if exp is None:
+            return {"error": f"no experiment called {experiment_id!r}"}
+        return experiment_features.analyse(store, exp)
 
 
 @server.tool(description="A briefing for one day: what the body is saying, "

@@ -164,6 +164,32 @@ class CheckIn(_Base):
     readings: str | None = None   # the raw BP readings behind the average
 
 
+class ExperimentEvent(_Base):
+    source: str
+    local_date: date
+    event: str                       # start | stop
+    experiment_id: str
+    hypothesis: str | None = None
+    exposure_type: str | None = None       # manual | metric_threshold
+    exposure_metric: str | None = None
+    exposure_threshold: float | None = None
+    outcome_metric: str | None = None
+    predicted_direction: str | None = None  # raises | lowers
+    block_days: int | None = None
+    blocks_planned: int | None = None
+    start_date: date | None = None
+    starting_condition: str | None = None   # A | B
+    reason: str | None = None
+
+
+class ExperimentAdherence(_Base):
+    source: str
+    experiment_id: str
+    local_date: date
+    adhered: bool
+    note: str | None = None
+
+
 @dataclass
 class Records:
     """Whatever one raw payload turned out to contain."""
@@ -178,6 +204,8 @@ class Records:
     cycle_events: list[CycleEvent] = field(default_factory=list)
     protocol_events: list[ProtocolEvent] = field(default_factory=list)
     checkins: list[CheckIn] = field(default_factory=list)
+    experiment_events: list[ExperimentEvent] = field(default_factory=list)
+    experiment_adherence: list[ExperimentAdherence] = field(default_factory=list)
     lab_results: list[LabResult] = field(default_factory=list)
     #: Workouts the source says were deleted upstream. Parsers report them;
     #: the store applies them, so that a session you deleted in the app on

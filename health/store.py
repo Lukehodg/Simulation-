@@ -77,6 +77,17 @@ TABLES: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
         ("source", "local_date"),
         ("source", "local_date", "note", "readings", "ingested_at"),
     ),
+    "experiment_events": (
+        ("source", "experiment_id", "event"),
+        ("source", "local_date", "event", "experiment_id", "hypothesis",
+         "exposure_type", "exposure_metric", "exposure_threshold", "outcome_metric",
+         "predicted_direction", "block_days", "blocks_planned", "start_date",
+         "starting_condition", "reason", "ingested_at"),
+    ),
+    "experiment_adherence": (
+        ("source", "experiment_id", "local_date"),
+        ("source", "experiment_id", "local_date", "adhered", "note", "ingested_at"),
+    ),
 }
 
 # Records field -> table
@@ -91,6 +102,8 @@ _RECORD_TABLES = {
     "cycle_events": "cycle_events",
     "protocol_events": "protocol_events",
     "checkins": "checkins",
+    "experiment_events": "experiment_events",
+    "experiment_adherence": "experiment_adherence",
     "lab_results": "lab_results",
 }
 
@@ -289,6 +302,9 @@ class Store:
             UNION ALL
             SELECT source, 'checkins', MIN(local_date), MAX(local_date), COUNT(*)
             FROM checkins GROUP BY source
+            UNION ALL
+            SELECT source, 'experiment_events', MIN(local_date), MAX(local_date), COUNT(*)
+            FROM experiment_events GROUP BY source
             UNION ALL
             SELECT source, 'lab_results', MIN(local_date), MAX(local_date), COUNT(*)
             FROM lab_results GROUP BY source
