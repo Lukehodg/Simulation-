@@ -235,3 +235,27 @@ def weekly_pattern_query(store: "Store", end: date | None = None) -> dict | None
                "source": "trend"}
 
     return None
+
+
+def weekly_research(store: "Store", end: date | None = None) -> dict | None:
+    """The week's one piece of outside evidence, if there is a pattern worth
+    it — `weekly_pattern_query` plus the literature call, in one place so the
+    brief and the live dashboard read off the same result rather than each
+    keeping their own copy.
+
+    A search failure is reported, not raised — a bad week for Europe PMC
+    should not take the pattern itself down with it.
+    """
+    pattern = weekly_pattern_query(store, end=end)
+    if pattern is None:
+        return None
+    try:
+        papers = search(pattern["query"], limit=4, since_year=2015,
+                        designs=["Meta-Analysis", "Systematic Review",
+                                "Randomized Controlled Trial", "Review"])
+    except Exception as exc:  # noqa: BLE001 - reported, not fatal to the caller
+        return {**pattern, "papers": [], "error": f"{type(exc).__name__}: {exc}"}
+    return {**pattern, "papers": [
+        {"title": p.title, "design": p.design, "journal": p.journal, "year": p.year,
+         "cited_by": p.cited_by, "url": p.url, "abstract": (p.abstract or "")[:1200]}
+        for p in papers]}

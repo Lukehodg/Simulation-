@@ -12,6 +12,7 @@ from datetime import date, timedelta
 from typing import Any
 
 from .. import metrics as M
+from .. import research as research_api
 from ..analytes import ANALYTES
 from ..config import Config
 from ..features import checkin as checkin_features
@@ -82,14 +83,29 @@ def _experiments_summary(store: Store, day: date) -> list[dict[str, Any]]:
     out = []
     for exp in experiment_features.all_experiments(store):
         block = experiment_features.current_block(exp, as_of=day)
+        # `analyse` degrades gracefully to verdict "too early" with no
+        # blocks collected yet, so it is safe to call unconditionally rather
+        # than gating on a week window the way the periodic brief does.
         out.append({
             "id": exp.id, "hypothesis": exp.hypothesis,
             "status": experiment_features.status(exp, as_of=day),
             "condition": block.condition if block else None,
             "day_in_block": (day - block.start).days + 1 if block else None,
             "block_days": exp.block_days,
+            "analysis": experiment_features.analyse(store, exp, as_of=day),
         })
     return out
+
+
+def _series_chart(series: list[tuple[date, float | None]], metric: str,
+                  unit: str) -> dict[str, Any]:
+    """The same shape `chart()` on the HRV series already renders — reused
+    here for series that are not a `daily_metrics` baseline, so no band."""
+    return {
+        "points": [{"date": str(d), "value": v, "phase": None} for d, v in series],
+        "median": None, "mad": None, "usable": False,
+        "metric": metric, "unit": unit,
+    }
 
 
 def today_payload(store: Store, config: Config, day: date | None = None) -> dict[str, Any]:
@@ -203,6 +219,13 @@ def today_payload(store: Store, config: Config, day: date | None = None) -> dict
         "check_in": checkin_features.subjective_vs_objective(store, day),
         "blood_pressure": checkin_features.blood_pressure(store, as_of=day),
         "experiments": _experiments_summary(store, day),
+        "weekly_research": research_api.weekly_research(store, day),
+        "load_chart": _series_chart(
+            daily.training_load_series(store, day - timedelta(days=27), day),
+            "Load ratio", ""),
+        "sleep_debt_chart": _series_chart(
+            readiness_features.sleep_debt_series(store, day - timedelta(days=27), day),
+            "Sleep debt", "h"),
         "strength": progressions,
         "bloods": bloods,
         "sync": {"connected": connected, "last_ok": synced,

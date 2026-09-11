@@ -376,6 +376,37 @@ def weekly_research_pattern(limit: int = 4) -> dict[str, Any]:
          "url": p.url, "abstract": (p.abstract or "")[:1200]} for p in papers]}
 
 
+@server.tool(description="Energy availability (kcal/kg fat-free mass/day) and "
+                         "the RED-S watch — a screening signal, not a "
+                         "diagnosis. Reports `available: false` honestly when "
+                         "nutrition/body-composition data is not connected, "
+                         "which is the case until MyFitnessPal or Apple "
+                         "Health nutrition is linked.")
+@guarded
+def energy_availability() -> dict[str, Any]:
+    from .features import energy as energy_features
+
+    with _store() as store:
+        ea = energy_features.energy_availability(store)
+        watch = energy_features.red_s_watch(store)
+    return {"energy_availability": ea.as_dict(), "red_s_watch": watch}
+
+
+@server.tool(description="Illness watch, a blood-pressure escalation, or a "
+                         "compound-monitoring marker trending — only what is "
+                         "currently flagged, the same three checks the "
+                         "scheduled alert job texts on. Read-only: does not "
+                         "send anything or change what has already been sent.")
+@guarded
+def active_alerts() -> dict[str, Any]:
+    from .alerts import check as check_alerts
+
+    with _store() as store:
+        active = check_alerts(store)
+    return {"flags": [a.as_dict() for a in active],
+           "note": "nothing currently flagged" if not active else None}
+
+
 @server.tool(description="Literature around one of their own blood results, "
                          "using its direction — low and high are different "
                          "literatures.")

@@ -40,6 +40,20 @@ def test_sleep_need_is_read_off_your_own_well_recovered_nights(store):
     assert debt.debt_hours > 5
 
 
+def test_sleep_debt_series_is_one_figure_per_day(store):
+    recovery = [80.0 if i % 2 else 40.0 for i in range(40)]
+    sleep = [480.0 if i % 2 else 360.0 for i in range(40)]
+    _obs(store, "recovery_score", recovery)
+    _obs(store, "sleep_duration", sleep)
+
+    series = readiness.sleep_debt_series(store, START + timedelta(days=30),
+                                         START + timedelta(days=39))
+
+    assert [d for d, _ in series] == [START + timedelta(days=i) for i in range(30, 40)]
+    single = readiness.sleep_debt(store, as_of=START + timedelta(days=39))
+    assert series[-1][1] == single.debt_hours
+
+
 def test_sleep_need_falls_back_to_a_default_when_history_is_thin(store):
     _obs(store, "sleep_duration", [400.0] * 8)
 

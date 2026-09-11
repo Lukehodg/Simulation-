@@ -165,6 +165,20 @@ def sleep_debt(store: Store, as_of: date | None = None,
     return result
 
 
+def sleep_debt_series(store: Store, start: date, end: date
+                      ) -> list[tuple[date, float | None]]:
+    """The day-by-day debt behind `sleep_debt`'s single number, for a chart.
+    One `sleep_debt` call per day, each over its own rolling window — the
+    same trade-off `daily.training_load_series` makes."""
+    out = []
+    day = start
+    while day <= end:
+        debt = sleep_debt(store, as_of=day)
+        out.append((day, debt.debt_hours if debt.nights else None))
+        day += timedelta(days=1)
+    return out
+
+
 # --------------------------------------------------------------------------
 # readiness to train
 # --------------------------------------------------------------------------

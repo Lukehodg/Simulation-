@@ -9,9 +9,11 @@ There is no server you have to run and no account to create — everything
 lives in one file on your own machine, and by default nothing leaves it. Two
 things are the deliberate exceptions: `health brief` and the bloods reader
 send a small labelled summary (never raw data) to Claude when you ask for a
-reading, and `health research` searches Europe PMC for public literature. Both
-are covered in their own sections below, with exactly what each sends shown
-before it's sent.
+reading, and `health research` searches Europe PMC for public literature —
+`health serve`'s dashboard also makes this second call itself, live on every
+load, to show this week's pattern with its literature alongside it (no
+caching, and nothing sent but a search string). Both are covered in their own
+sections below, with exactly what each sends shown before it's sent.
 
 [`PLAN.md`](PLAN.md) is the design: why each source is reached the way it is,
 what the analysis layer computes, and what comes next.
@@ -36,15 +38,18 @@ Built and tested:
 | **Protocol** | Compounds you're on as an axis of interpretation — documented effects, monitoring markers, pre-panel checklist; escalation, never dosing |
 | **Check-in** | Daily blood pressure (averaged, trended, escalated) and how you feel — read against the computed state, not just logged |
 | **Experiments** | Pre-registered n-of-1 trials — an exact permutation test over alternating blocks, with its own p-value floor always reported |
+| **Weekly research** | The week's most notable pattern — an experiment result, a trending compound marker, a recovery driver, or a drift — turned into a literature search, on the dashboard and in the weekly brief |
+| **Alerts** | Illness watch, a BP escalation, or a compound marker trending — texted once when it appears, silent while it stays true, `health alert --notify` |
+| **Energy availability** | Screening figure (kcal/kg fat-free mass/day) and a RED-S watch — built and tested now, dormant until nutrition/body-comp data connects |
 | **Brief** | `health brief` — the day (or the week) read back to you in two paragraphs, on a schedule if you want it |
-| **Agent tools** | 35 MCP tools — the surface Claude actually talks to |
-| **Interface** | A local page on 127.0.0.1, served from the same database |
+| **Agent tools** | 37 MCP tools — the surface Claude actually talks to |
+| **Interface** | A local page on 127.0.0.1, served from the same database — readiness, protocol, six-week drift, sleep architecture, check-in, experiment verdicts, load-ratio and sleep-debt charts, this week's research |
 | **Bloods page** | Drop a report in, see what is flagged, ask Claude to read it |
 | **Indicators** | Per-domain status with the evidence behind each — deliberately no single score |
 | **Training observations** | Stalled, dormant, progressing and imbalanced, computed from your sets |
 
-Next: the Garmin export and `.FIT` parsers, and energy availability (which
-needs Garmin's expenditure data).
+Next: the Garmin export and `.FIT` parsers, and connecting MyFitnessPal or
+Apple Health nutrition (which is what energy availability above is waiting on).
 
 ## Setup
 
@@ -320,6 +325,44 @@ clean ones, will land on the more common *"a trend … not distinguishable from
 chance"* verdict instead. That is the intended, conservative default, not the
 test failing — read it as "worth more blocks" rather than "no effect".
 
+## Alerts
+
+Illness watch, a BP escalation, and a compound-monitoring marker trending are
+all computed already; none of them reach you unless you happen to open the
+brief or the dashboard that day. `health alert` closes that gap — never a
+daily digest, only what's actually flagged:
+
+```sh
+health alert            # prints current flags, and which are new vs. already sent
+health alert --notify   # texts the new ones over iMessage, and remembers them
+```
+
+Each flag texts once, stays silent on later checks while it's still true, and
+alerts again only if it clears and then recurs — a condition that takes a
+week to resolve sends one message, not one per scheduled check.
+`health schedule --alert` runs it 15 minutes after each sync (07:30 and
+19:30 by default), and needs `HEALTH_NOTIFY_IMESSAGE` set — an alert job that
+never texts you is pointless, so it refuses to install without it.
+
+## Energy availability
+
+`energy_availability` (kcal/kg fat-free mass/day, Loucks & Thuma's threshold
+for when reproductive/metabolic function starts to disrupt) and `red_s_watch`
+— sustained low energy availability, an elevated training load, and cycle
+disruption, together — are built and tested now, and report honestly that
+they're `available: false` today, because MyFitnessPal and Apple Health
+nutrition aren't connected yet:
+
+```sh
+health energy
+```
+
+The moment nutrition and body-composition data start arriving, this
+activates with no further code — `red_s_watch`'s `flag: "watch"` is the
+concrete case from this project's original design: when the three signals
+line up together, the answer is "worth a conversation with a doctor," never a
+nutrition tweak suggested here.
+
 ## Blood tests
 
 Labs arrive as a file, not an API. Write one panel per file, in either format:
@@ -409,10 +452,11 @@ and the literature on *high* ferritin are different literatures.
 evidence first: a completed pre-registered experiment, then a compound
 monitoring marker actually moving, then the strongest recovery driver, then
 the strongest six-week trend — and searches around that. The same selection
-feeds `health brief --week`'s `weekly_research` block, so the brief cites
-whatever this would have found, under the same rule the bloods reader already
-holds: retrieval, not a verdict — a paper about caffeine and HRV in general
-does not prove what happened in your week.
+feeds `health brief --week`'s `weekly_research` block and `health serve`'s
+dashboard, so all three read off the one `weekly_research` function and would
+cite the same papers, under the same rule the bloods reader already holds:
+retrieval, not a verdict — a paper about caffeine and HRV in general does not
+prove what happened in your week.
 
 It retrieves and labels evidence; it does not interpret it. A citation count is
 popularity and a publication type is a design, and neither is a verdict on
@@ -427,6 +471,7 @@ whether a finding applies to you.
 ```sh
 health schedule --install              # sync at 07:15 and 19:15 daily
 health schedule --brief                # also write a brief at 07:45
+health schedule --alert                # also check flags at 07:30 and 19:30, text what's new
 health schedule                        # is it loaded, and what did the last run say
 health backup --to ~/Dropbox/health    # archive raw/
 ```
@@ -444,6 +489,11 @@ instead.
 sync, logging to `data/logs/brief.log`. It is only installed if
 `ANTHROPIC_API_KEY` is set — the brief has nothing to do without it —
 and `health schedule --no-brief` removes it.
+
+`--alert` adds a third agent — see [Alerts](#alerts) above — that runs
+`health alert --notify` 15 minutes after each sync, logging to
+`data/logs/alert.log`. It is only installed if `HEALTH_NOTIFY_IMESSAGE` is
+set, since an alert job that can never text you is pointless.
 
 Two syncs cannot run at once: DuckDB gives the file to a single writer, so a
 scheduled run that collides with a manual one now stops with a sentence rather
@@ -467,9 +517,11 @@ health serve          # opens http://127.0.0.1:8899
 One page: a protocol banner and illness-watch alert where relevant, the day's
 verdict, a readout row with each metric's deviation from its own baseline, the
 readiness call with its reasons, HRV against its baseline band with the
-current cycle phase shaded, six-week drift and sleep architecture, your
-check-in and blood pressure, any running experiment, strength trends with
-their fit, and whatever your last blood panel flagged.
+current cycle phase shaded, load-ratio and sleep-debt charts alongside it,
+six-week drift and sleep architecture, your check-in and blood pressure, any
+experiment with its current verdict (not just its schedule position), this
+week's research pattern with its literature, strength trends with their fit,
+and whatever your last blood panel flagged.
 
 It is deliberately a readout rather than a dashboard — rules instead of cards,
 monospaced figures aligned so a column reads at a glance, and uncertainty
@@ -628,10 +680,11 @@ the agent:
 claude mcp add health -- /path/to/.venv/bin/health mcp --root /path/to/project
 ```
 
-That exposes 35 tools — baselines, deviations, correlations, training load,
+That exposes 37 tools — baselines, deviations, correlations, training load,
 lift progression, cycle phase, blood results, literature search, the readiness
-call and its cross-domain siblings, and a daily brief that pulls them together.
-Then you can just ask:
+call and its cross-domain siblings, what's currently flagged, energy
+availability, and a daily brief that pulls them together. Then you can just
+ask:
 
 > *why has my sleep been bad since August?*
 > *am I actually getting stronger on RDLs, or just adding reps?*

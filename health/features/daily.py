@@ -223,6 +223,19 @@ def training_load(store: Store, as_of: date | None = None, acute: int = 7,
                         days=chronic, method="ewma")
 
 
+def training_load_series(store: Store, start: date, end: date
+                         ) -> list[tuple[date, float | None]]:
+    """The day-by-day ratio behind `training_load`'s single number, for a
+    chart rather than a headline figure. One `training_load` call per day —
+    cheap on a personal dataset, not worth a bespoke rolling computation."""
+    out = []
+    day = start
+    while day <= end:
+        out.append((day, training_load(store, as_of=day).ratio))
+        day += timedelta(days=1)
+    return out
+
+
 def _ewma(values: list[float], alpha: float) -> float:
     if not values:
         return 0.0

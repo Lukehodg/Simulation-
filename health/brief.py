@@ -27,6 +27,7 @@ from .config import Config
 from .features import daily, readiness
 from .features import checkin as checkin_features
 from .features import cycle as cycle_features
+from .features import energy as energy_features
 from .features import experiment as experiment_features
 from .features import protocol as protocol_features
 from .features import sleep as sleep_features
@@ -112,11 +113,18 @@ Ground rules:
   percentage. The readiness field is a recommendation with reasons; report it
   that way.
 
-- ESCALATE, don't manage, a real clinical shape. Sustained low energy
-  availability with high training load (and, for anyone with a cycle, cycle
-  disruption) is the RED-S signature and the right response is "these together
-  are worth raising with a doctor", not a nutrition tweak. Rapid weight loss on
-  a GLP-1 agonist alongside heavy training is the same shape.
+- ENERGY AVAILABILITY. `energy_availability` reports a screening figure
+  (kcal/kg fat-free mass/day), not a clinical measurement — say so if you
+  mention it at all, and say plainly when it is `available: false` (nutrition
+  and body-composition data are not connected yet; do not treat that as a
+  finding of its own). `red_s_watch` is the actual escalation: `flag: "watch"`
+  means low energy availability, elevated training load and cycle disruption
+  are all present together, the recognised RED-S signature — the right
+  response is "these together are worth raising with a doctor", never a
+  nutrition tweak you suggest yourself. `flag: "clear"` or `"insufficient
+  data"` mean exactly that; do not editorialise past what the flag says.
+  Rapid weight loss on a GLP-1 agonist alongside heavy training is the same
+  clinical shape and gets the same treatment — escalate, don't manage.
 
 - Say when the data is thin. A baseline built on nine days, a correlation with
   an effective sample of twelve — name the limit rather than writing around it.
@@ -203,26 +211,6 @@ def _finished_experiment_analyses(store: Store, start: date, end: date) -> list[
     return out
 
 
-def _weekly_research(store: Store, end: date) -> dict[str, Any] | None:
-    """The week's one piece of outside evidence, if there is a pattern worth
-    it — the literature equivalent of `analysis.gather_literature`, for
-    training and recovery findings instead of a blood result."""
-    pattern = research_api.weekly_pattern_query(store, end=end)
-    if pattern is None:
-        return None
-    try:
-        papers = research_api.search(
-            pattern["query"], limit=4, since_year=2015,
-            designs=["Meta-Analysis", "Systematic Review",
-                    "Randomized Controlled Trial", "Review"])
-    except Exception as exc:  # noqa: BLE001 - reported, not fatal to the brief
-        return {**pattern, "papers": [], "error": f"{type(exc).__name__}: {exc}"}
-    return {**pattern, "papers": [
-        {"title": p.title, "design": p.design, "journal": p.journal, "year": p.year,
-         "cited_by": p.cited_by, "url": p.url, "abstract": (p.abstract or "")[:1200]}
-        for p in papers]}
-
-
 def daily_payload(store: Store, day: date | None = None) -> dict[str, Any]:
     """Everything the daily brief is written from, and nothing else."""
     day = day or date.today()
@@ -297,6 +285,8 @@ def weekly_payload(store: Store, end: date | None = None) -> dict[str, Any]:
         "strength_vs_recovery": readiness.strength_recovery_link(store, end=end),
         "training_observations": training_features.observations(store, as_of=end),
         "phase_training_plan": readiness.phase_training_plan(store, today=end),
+        "energy_availability": energy_features.energy_availability(store, as_of=end).as_dict(),
+        "red_s_watch": energy_features.red_s_watch(store, as_of=end),
         "protocol": protocol_features.summary(store, today=end),
         "check_in_today": checkin_features.subjective_vs_objective(store, end),
         "blood_pressure": checkin_features.blood_pressure(store, as_of=end),
@@ -308,7 +298,7 @@ def weekly_payload(store: Store, end: date | None = None) -> dict[str, Any]:
     finished = _finished_experiment_analyses(store, start, end)
     if finished:
         payload["experiment_results"] = finished
-    research_result = _weekly_research(store, end)
+    research_result = research_api.weekly_research(store, end)
     if research_result:
         payload["weekly_research"] = research_result
     return payload

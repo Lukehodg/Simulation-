@@ -247,6 +247,28 @@ class Store:
              datetime.now(timezone.utc) if parsed else None],
         )
 
+    # -- alert bookkeeping ---------------------------------------------------
+
+    def alerted(self, flag_key: str) -> bool:
+        """Whether this flag has already been texted and has not cleared
+        since — `health alert` stays quiet while this is true."""
+        row = self.db.execute(
+            "SELECT 1 FROM alert_state WHERE flag_key = ?", [flag_key]
+        ).fetchone()
+        return row is not None
+
+    def mark_alerted(self, flag_key: str) -> None:
+        self.db.execute(
+            "INSERT INTO alert_state (flag_key, first_sent_at) VALUES (?, ?) "
+            "ON CONFLICT (flag_key) DO NOTHING",
+            [flag_key, datetime.now(timezone.utc)],
+        )
+
+    def clear_alert(self, flag_key: str) -> None:
+        """A flag no longer active — forget it, so it alerts again if it
+        recurs rather than staying silenced forever."""
+        self.db.execute("DELETE FROM alert_state WHERE flag_key = ?", [flag_key])
+
     # -- reading -----------------------------------------------------------
 
     def replace_table(self, table: str, columns: Sequence[str],

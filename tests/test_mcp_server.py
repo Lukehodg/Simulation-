@@ -126,6 +126,20 @@ def test_the_daily_brief_pulls_the_pieces_together(served):
     assert "cycle" in result          # cycle logs exist, so it is included
 
 
+def test_energy_availability_is_honest_about_being_dormant(served):
+    result = call("energy_availability")
+
+    assert result["energy_availability"]["available"] is False
+    assert result["red_s_watch"]["flag"] == "insufficient data"
+
+
+def test_active_alerts_reports_nothing_flagged_on_a_quiet_fixture(served):
+    result = call("active_alerts")
+
+    assert result["flags"] == []
+    assert "nothing" in result["note"]
+
+
 def test_a_missing_database_is_reported_to_the_model_not_hidden(config):
     """The SDK strips exception messages on the way out, so an unusable
     database has to come back as data or the model is left guessing."""

@@ -163,3 +163,36 @@ def test_a_completed_experiment_outranks_everything(store):
 
     assert result["source"] == "experiment"
     assert "magnesium" in result["pattern"]
+
+
+# -- weekly_research --------------------------------------------------------
+
+def test_weekly_research_is_none_on_a_quiet_week(store):
+    assert research.weekly_research(store, end=WEND) is None
+
+
+def test_weekly_research_attaches_papers_to_the_pattern(store, monkeypatch):
+    _obs(store, "respiratory_rate", [14.0 - 0.05 * i for i in range(80)])
+    orig_search = research.search
+    monkeypatch.setattr(research, "search",
+                        lambda *a, **k: orig_search("respiratory rate", client=_client()))
+
+    result = research.weekly_research(store, end=WEND)
+
+    assert result["source"] == "trend"
+    assert len(result["papers"]) == 2
+    assert result["papers"][0]["design"] == "meta-analysis"
+
+
+def test_weekly_research_reports_a_search_failure_without_losing_the_pattern(store, monkeypatch):
+    _obs(store, "respiratory_rate", [14.0 - 0.05 * i for i in range(80)])
+
+    def _boom(*a, **k):
+        raise httpx.ConnectError("no network")
+    monkeypatch.setattr(research, "search", _boom)
+
+    result = research.weekly_research(store, end=WEND)
+
+    assert result["source"] == "trend"       # the pattern itself still came through
+    assert result["papers"] == []
+    assert "ConnectError" in result["error"]

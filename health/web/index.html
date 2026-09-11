@@ -276,6 +276,36 @@ function experimentsStrip(experiments) {
     row.appendChild(el("div", "fig", e.condition
       ? `${e.condition} · day ${e.day_in_block}/${e.block_days}` : "—"));
     box.appendChild(row);
+    // `analyse` always returns a verdict, even "too early" with no blocks
+    // collected yet — show it as a quiet caption under the row.
+    if (e.analysis && e.analysis.verdict) {
+      box.appendChild(el("p", "caption", e.analysis.verdict));
+    }
+  });
+  return box;
+}
+
+/* ---------- weekly research ---------- */
+function weeklyResearchSection(research) {
+  if (!research || !research.pattern) return null;
+  const box = el("section");
+  box.appendChild(el("h3", null, "This week's pattern"));
+  box.appendChild(el("p", "caption", research.pattern));
+  if (research.error) {
+    box.appendChild(el("p", "caption", `literature search failed: ${research.error}`));
+    return box;
+  }
+  if (!research.papers || !research.papers.length) {
+    box.appendChild(el("p", "caption", "no matching literature found"));
+    return box;
+  }
+  research.papers.forEach(p => {
+    const row = el("div", "row");
+    const title = p.url ? `<a href="${p.url}" target="_blank" rel="noopener">${p.title}</a>` : p.title;
+    row.appendChild(el("div", "name", title));
+    const bits = [p.design, p.journal, p.year].filter(Boolean).join(" · ");
+    row.appendChild(el("div", "fig", `${bits}${p.cited_by ? ` · ${p.cited_by} cites` : ""}`));
+    box.appendChild(row);
   });
   return box;
 }
@@ -365,6 +395,16 @@ function render(data) {
     : "Not enough history for a baseline band yet."));
   body.appendChild(strip);
 
+  const smallCharts = el("section", "cols");
+  [data.load_chart, data.sleep_debt_chart].forEach(c => {
+    if (!c || c.points.filter(p => p.value !== null).length < 2) return;
+    const box = el("div");
+    box.appendChild(el("div", "colhead", `${c.metric} · ${c.points.length} days`));
+    box.appendChild(chart(c));
+    smallCharts.appendChild(box);
+  });
+  if (smallCharts.children.length) body.appendChild(smallCharts);
+
   const trendsBox = sixWeekTrends(data.six_week_trends);
   const sleepBox = sleepArchitecture(data.sleep_architecture);
   if (trendsBox || sleepBox) {
@@ -382,6 +422,9 @@ function render(data) {
     if (expBox) noteCols.appendChild(expBox);
     body.appendChild(noteCols);
   }
+
+  const researchBox = weeklyResearchSection(data.weekly_research);
+  if (researchBox) body.appendChild(researchBox);
 
   const cols = el("section", "cols");
   cols.appendChild(strength(data.strength));

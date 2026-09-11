@@ -326,6 +326,36 @@ def test_today_payload_carries_the_full_cross_domain_picture(db, config):
     assert "note" in payload["check_in"] or "rows" in payload["check_in"]
     assert "note" in payload["blood_pressure"] or "verdict" in payload["blood_pressure"]
     assert payload["experiments"] == []
+    # a quiet, synthetic week: no experiment/monitoring/driver/trend pattern
+    # strong enough to search for, so this stays local — no network call made.
+    assert payload["weekly_research"] is None
+    for chart in ("load_chart", "sleep_debt_chart"):
+        assert len(payload[chart]["points"]) == 28
+        assert payload[chart]["usable"] is False
+
+
+def test_an_experiment_carries_its_current_analysis(db, config):
+    from health.features import experiment as experiment_features
+    from health.models import ExperimentEvent
+
+    _seed(db)
+    db.load(Records(experiment_events=[ExperimentEvent(
+        source="experiment", local_date=START, event="start", experiment_id="e1",
+        hypothesis="late caffeine and HRV", exposure_type="manual",
+        outcome_metric="hrv_rmssd", predicted_direction="lowers", block_days=7,
+        blocks_planned=6, start_date=START, starting_condition="A")]))
+
+    payload = today_payload(db, config, day=TODAY)
+
+    exp = next(e for e in payload["experiments"] if e["id"] == "e1")
+    # `_seed`'s 42 days of hrv_rmssd give this manual experiment real
+    # per-block outcome data by day 41 — the exact verdict isn't the point
+    # here, only that `analyse` ran and landed on one of its known verdicts.
+    assert exp["analysis"]["verdict"] in (
+        "too early", "an effect in the predicted direction",
+        "a trend in the predicted direction, not distinguishable from "
+        "chance with this many blocks",
+        "no support for the predicted direction")
 
 
 def test_an_empty_database_still_carries_the_new_keys_without_erroring(db, config):
@@ -333,5 +363,6 @@ def test_an_empty_database_still_carries_the_new_keys_without_erroring(db, confi
 
     assert payload["empty"] is True
     for key in ("readiness", "protocol", "illness_watch", "six_week_trends",
-               "sleep_architecture", "check_in", "blood_pressure", "experiments"):
+               "sleep_architecture", "check_in", "blood_pressure", "experiments",
+               "weekly_research", "load_chart", "sleep_debt_chart"):
         assert key in payload

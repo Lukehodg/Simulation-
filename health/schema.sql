@@ -264,3 +264,11 @@ CREATE TABLE IF NOT EXISTS raw_files (
     size_bytes  BIGINT,
     parsed_at   TIMESTAMPTZ
 );
+
+-- `health alert`'s dedup memory: a flag that has already been texted stays
+-- here until it clears, so a condition that takes a week to resolve sends
+-- one message, not one per scheduled check.
+CREATE TABLE IF NOT EXISTS alert_state (
+    flag_key       VARCHAR PRIMARY KEY,
+    first_sent_at  TIMESTAMPTZ NOT NULL
+);

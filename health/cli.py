@@ -509,13 +509,15 @@ def cmd_schedule(args, config) -> int:
         print(scheduler.remove(config))
         if args.brief is not None or scheduler.status(config, "brief")["installed"]:
             print(scheduler.remove(config, "brief"))
+        if args.alert is not None or scheduler.status(config, "alert")["installed"]:
+            print(scheduler.remove(config, "alert"))
         return 0
 
     if args.no_brief:
         print(scheduler.remove(config, "brief"))
         return 0
 
-    if args.install or args.brief is not None:
+    if args.install or args.brief is not None or args.alert is not None:
         config.ensure_dirs()
         try:
             if args.install:
@@ -526,12 +528,16 @@ def cmd_schedule(args, config) -> int:
                 _, message = scheduler.install(config, brief_time, job="brief",
                                                notify=args.notify)
                 print(message)
+            if args.alert is not None:
+                alert_time = args.alert or None
+                _, message = scheduler.install(config, alert_time, job="alert")
+                print(message)
         except ValueError as exc:
             raise SystemExit(str(exc))
         return 0
 
     shown = False
-    for job in ("sync", "brief"):
+    for job in ("sync", "brief", "alert"):
         state = scheduler.status(config, job)
         if not state["installed"]:
             continue
@@ -623,6 +629,59 @@ def cmd_sql(args, config) -> int:
     for row in rows:
         print(" | ".join("" if v is None else str(v) for v in row))
     print(f"\n{len(rows)} row(s)")
+    return 0
+
+
+def cmd_alert(args, config) -> int:
+    from . import alerts as alerts_mod
+
+    if args.notify:
+        if not config.notify_imessage:
+            raise SystemExit("--notify needs HEALTH_NOTIFY_IMESSAGE set to your "
+                             "own number or Apple ID (in .env).")
+        with _store(config) as store:
+            sent = alerts_mod.send(store, handle=config.notify_imessage)
+        if not sent:
+            print("nothing new to alert on.")
+            return 0
+        for alert in sent:
+            print(f"texted: {alert.message}")
+        return 0
+
+    with _store(config, read_only=True) as store:
+        active = alerts_mod.check(store)
+        flags = [(a, store.alerted(a.key)) for a in active]
+    if not flags:
+        print("nothing flagged.")
+        return 0
+    for alert, already in flags:
+        print(f"{'(already sent) ' if already else '(new) '}{alert.message}")
+    return 0
+
+
+def cmd_energy(args, config) -> int:
+    import json as _json
+
+    from .features import energy as energy_features
+
+    with _store(config, read_only=True) as store:
+        ea = energy_features.energy_availability(store, days=args.days)
+        watch = energy_features.red_s_watch(store)
+
+    if args.json:
+        print(_json.dumps({"energy_availability": ea.as_dict(), "red_s_watch": watch},
+                          indent=2, default=str))
+        return 0
+
+    if not ea.available:
+        print(f"energy availability: not available — {ea.note}")
+    else:
+        print(f"energy availability: {ea.ea} kcal/kg FFM/day ({ea.verdict}) "
+             f"— {ea.note}")
+    print(f"RED-S watch: {watch['flag']}"
+         + (f" — {watch['note']}" if watch.get("note") else ""))
+    if watch.get("missing"):
+        print("  missing: " + ", ".join(watch["missing"]))
     return 0
 
 
@@ -1075,6 +1134,21 @@ def build_parser() -> argparse.ArgumentParser:
     checkin_cmd.add_argument("--days", type=int, default=14)
     checkin_cmd.set_defaults(fn=cmd_checkin)
 
+    alert_cmd = sub.add_parser("alert", help="illness watch, a BP escalation, "
+                                             "or a compound marker trending — "
+                                             "only what is actually flagged")
+    alert_cmd.add_argument("--notify", action="store_true",
+                           help="text new flags over iMessage and remember "
+                                "them, instead of just printing")
+    alert_cmd.set_defaults(fn=cmd_alert)
+
+    energy_cmd = sub.add_parser("energy", help="energy availability and the "
+                                              "RED-S watch — dormant until "
+                                              "nutrition/body-comp data connects")
+    energy_cmd.add_argument("--days", type=int, default=7)
+    energy_cmd.add_argument("--json", action="store_true")
+    energy_cmd.set_defaults(fn=cmd_energy)
+
     experiment_cmd = sub.add_parser("experiment", help="pre-register an n-of-1 "
                                                        "trial and test it")
     experiment_cmd.add_argument("action", nargs="?", default="list",
@@ -1146,6 +1220,13 @@ def build_parser() -> argparse.ArgumentParser:
                                    "(needs HEALTH_NOTIFY_IMESSAGE)")
     schedule_cmd.add_argument("--no-brief", action="store_true",
                               help="stop the daily brief agent")
+    schedule_cmd.add_argument("--alert", nargs="?", const="", default=None,
+                              metavar="TIMES",
+                              help="also check illness watch, BP escalation and "
+                                   "compound markers and text only what's flagged "
+                                   "(default 07:30,19:30); needs "
+                                   "HEALTH_NOTIFY_IMESSAGE, always run with "
+                                   "--notify")
     schedule_cmd.set_defaults(fn=cmd_schedule)
 
     backup_cmd = sub.add_parser("backup", help="archive raw/")

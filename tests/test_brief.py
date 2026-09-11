@@ -56,6 +56,9 @@ def test_weekly_payload_carries_the_cross_domain_passes(store):
     assert payload["recovery_drivers"]["comparisons_made"] >= 0
     # Seven days of series, not the whole history.
     assert len(payload["daily_series"]["hrv_rmssd"]) <= 7
+    # Dormant until nutrition/body-comp data connects, but always present.
+    assert payload["energy_availability"]["available"] is False
+    assert payload["red_s_watch"]["flag"] == "insufficient data"
 
 
 def test_generate_returns_a_stub_when_there_is_no_data(store, config):

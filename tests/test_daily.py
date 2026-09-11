@@ -175,6 +175,16 @@ def test_training_load_combines_strain_and_tonnage(store):
     assert "steady" in load.describe()
 
 
+def test_training_load_series_is_one_ratio_per_day(store):
+    _load(store, "strain", [10.0] * 28)
+
+    series = daily.training_load_series(store, START + timedelta(days=20),
+                                        START + timedelta(days=27))
+
+    assert [d for d, _ in series] == [START + timedelta(days=i) for i in range(20, 28)]
+    assert series[-1][1] == pytest.approx(1.0)   # matches the single-day call
+
+
 def test_ewma_is_the_default_and_flat_is_still_available(store):
     # 21 quiet days, then a week of hard training.
     _load(store, "strain", [5.0] * 21 + [18.0] * 7)

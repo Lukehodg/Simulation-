@@ -33,6 +33,12 @@ JOBS: dict[str, tuple[str, tuple[str, ...], str, tuple[str, ...]]] = {
     "sync": ("com.health.sync", ("sync",), "sync.log", ("07:15", "19:15")),
     "brief": ("com.health.brief", ("brief", "--save", "--html"), "brief.log",
               ("07:45",)),
+    # 15 minutes after each sync, so the flags it checks are reading the
+    # morning's/evening's fresh data rather than yesterday's. Unlike `brief`,
+    # this job is pointless without `--notify` — silence is the whole point
+    # of an alert job that only speaks when something is actually flagged.
+    "alert": ("com.health.alert", ("alert", "--notify"), "alert.log",
+              ("07:30", "19:30")),
 }
 
 
@@ -147,6 +153,10 @@ def install(config: Config, times: str | None = None, job: str = "sync",
     if job == "brief" and notify and not config.notify_imessage:
         return schedule, ("--notify needs HEALTH_NOTIFY_IMESSAGE set (your own "
                           "number or Apple ID, in .env) — not installed.")
+    if job == "alert" and not config.notify_imessage:
+        return schedule, ("HEALTH_NOTIFY_IMESSAGE is not set, and an alert job "
+                          "that never texts you is pointless — skipped. Add it, "
+                          "then `health schedule --alert`.")
     return schedule, _load(schedule, config)
 
 
