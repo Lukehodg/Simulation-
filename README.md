@@ -5,8 +5,13 @@ MyFitnessPal and Hevy into one DuckDB file on your own machine, so that
 questions spanning all four — *does my training load explain this week's
 sleep, or is it my cycle?* — can actually be asked.
 
-Nothing leaves the machine. There is no server, no account, and no cloud
-component.
+There is no server you have to run and no account to create — everything
+lives in one file on your own machine, and by default nothing leaves it. Two
+things are the deliberate exceptions: `health brief` and the bloods reader
+send a small labelled summary (never raw data) to Claude when you ask for a
+reading, and `health research` searches Europe PMC for public literature. Both
+are covered in their own sections below, with exactly what each sends shown
+before it's sent.
 
 [`PLAN.md`](PLAN.md) is the design: why each source is reached the way it is,
 what the analysis layer computes, and what comes next.
@@ -307,6 +312,13 @@ the predicted direction"*, *"a trend … not distinguishable from chance with
 this many blocks"*, or *"no support for the predicted direction"*, never
 "significant" or "proven". A result here is this one person's twelve weeks,
 not a finding about anyone else.
+
+*"An effect in the predicted direction"* is a strict bar by design — it needs
+the observed split to be the single most extreme relabelling the block count
+allows, i.e. `p` sitting exactly on its own floor. Most real effects, even
+clean ones, will land on the more common *"a trend … not distinguishable from
+chance"* verdict instead. That is the intended, conservative default, not the
+test failing — read it as "worth more blocks" rather than "no effect".
 
 ## Blood tests
 

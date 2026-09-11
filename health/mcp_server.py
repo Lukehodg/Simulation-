@@ -34,6 +34,7 @@ from .features import protocol as protocol_features
 from .features import readiness as readiness_features
 from .features import sleep as sleep_features
 from .features import strength as strength_features
+from .features import training as training_features
 from .features import trend as trend_features
 from .research import evidence_query, search, weekly_pattern_query
 from .store import Store
@@ -588,6 +589,7 @@ def daily_brief(day: str | None = None) -> dict[str, Any]:
             "six_week_trends": [t.as_dict()
                                 for t in trend_features.trends(store, as_of=target)],
             "illness_watch": readiness_features.illness_watch(store, as_of=target),
+            "training_observations": training_features.observations(store, as_of=target),
         }
         on = protocol_features.summary(store, today=target)
         if on.get("on"):

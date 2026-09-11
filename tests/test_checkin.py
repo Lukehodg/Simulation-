@@ -175,7 +175,10 @@ def test_no_checkin_today_says_so(store):
     assert "no check-in" in result["note"]
 
 
-def test_low_libido_is_annotated_with_compound_context(store):
+def test_low_libido_on_testosterone_is_left_unannotated_not_guessed(store):
+    # compounds.py deliberately claims no direction for testosterone's effect
+    # on libido (the literature isn't reliably one-directional), so a low
+    # rating should not appear with fabricated compound context.
     _clean_days(store)
     day = START + timedelta(days=31)
     _log(store, day, libido=1)
@@ -185,10 +188,23 @@ def test_low_libido_is_annotated_with_compound_context(store):
     protocol_features.rebuild(store)
 
     result = checkin.subjective_vs_objective(store, day)
-    libido_row = next((r for r in result["rows"] if r["dimension"] == "libido"), None)
-    # testosterone doesn't document a libido effect either way, so this may be
-    # silent — the assertion is just that nothing crashes and rows stay well-formed
-    assert result["rows"] is not None
+
+    assert not any(r["dimension"] == "libido" for r in result["rows"])
+
+
+def test_low_gi_comfort_on_a_glp1_is_annotated_with_compound_context(store):
+    _clean_days(store)
+    day = START + timedelta(days=31)
+    _log(store, day, gi_comfort=1)
+    store.load(Records(protocol_events=[ProtocolEvent(
+        source="protocol", local_date=START, event="start", compound="retatrutide",
+        dose=2, unit="mg", freq="weekly")]))
+    protocol_features.rebuild(store)
+
+    result = checkin.subjective_vs_objective(store, day)
+
+    gi_row = next(r for r in result["rows"] if r["dimension"] == "GI comfort")
+    assert "retatrutide" in gi_row["data_says"].lower()
 
 
 # -- divergence history ---------------------------------------------------

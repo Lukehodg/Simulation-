@@ -249,7 +249,7 @@ function checkinSection(checkin, bp) {
   if (bp && bp.verdict) {
     const row = el("div", "row");
     row.appendChild(el("div", "name", "Blood pressure"));
-    const cls = bp.verdict === "see a doctor" ? "high" : bp.verdict === "watch" ? "low" : "";
+    const cls = bp.verdict === "see a doctor" ? "attention" : bp.verdict === "watch" ? "watch" : "ok";
     const tag = cls ? `<span class="tag ${cls}">${bp.verdict}</span>` : bp.verdict;
     row.appendChild(el("div", "fig",
       `${fmt(bp.average_systolic, 0)}/${fmt(bp.average_diastolic, 0)} ${tag}`));

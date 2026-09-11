@@ -308,7 +308,10 @@ def readiness(store: Store, day: date | None = None) -> Readiness:
     reasons.append(f"sleep debt {debt.debt_hours:+.1f} h over {debt.nights} "
                    f"nights (need {debt.need_hours} h, {debt.basis})")
 
-    ratio = load.ratio or 1.0
+    # `or` would silently turn a genuine zero-acute-load week (no training
+    # logged yet, or a real rest week) into "steady" — only a missing ratio
+    # should fall back to neutral.
+    ratio = load.ratio if load.ratio is not None else 1.0
     if (adverse_signals >= 2 or ratio > 1.5
             or (adverse_signals >= 1 and debt.debt_hours > 3)):
         rec = PULL_BACK
@@ -487,10 +490,13 @@ def recovery_drivers(store: Store, targets: tuple[str, ...] = (M.HRV_RMSSD,
             corr = daily.correlate_series(name, left, target, right, lag_days=lag)
             if corr.r is None or corr.crosses_zero:
                 continue
-            controls = [c for c in (M.STRAIN, M.ALCOHOL, "last_workout_hour",
-                                    M.CAFFEINE)
-                        if c != name and c in inputs]
-            controls = [c for c in controls if c in _DRIVER_METRICS]  # real columns only
+            # Candidates for `partial_correlate` are restricted to real
+            # `daily_metrics` columns — it re-reads each one with
+            # `daily.series`, which the synthetic inputs (tonnage,
+            # last-workout-hour) have no row for — and the input itself is
+            # never its own control.
+            controls = [c for c in (M.STRAIN, M.ALCOHOL, M.CAFFEINE)
+                       if c != name and c in inputs and c in _DRIVER_METRICS]
             adjusted = partial_correlate(store, name, target, controls,
                                          lag_days=lag, days=days, end=end) \
                 if controls and name in _DRIVER_METRICS else None

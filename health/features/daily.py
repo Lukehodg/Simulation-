@@ -212,8 +212,9 @@ def training_load(store: Store, as_of: date | None = None, acute: int = 7,
     # zero, but leading days with no data at all are not — padding them would
     # drag the chronic average down and inflate the ratio). Decay with
     # lambda = 2/(N+1), the conventional span-to-alpha mapping.
-    first = min(per_day) if per_day else as_of
-    start = max(first, lookback + timedelta(days=1))
+    # `_daily_load`'s own query already excludes anything on or before
+    # `lookback`, so its earliest key can never need clamping forward.
+    start = min(per_day) if per_day else as_of
     span_days = (as_of - start).days + 1
     series = [per_day.get(start + timedelta(days=i), 0.0) for i in range(span_days)]
     ewma_acute = _ewma(series, 2 / (acute + 1))

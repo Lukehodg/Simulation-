@@ -4,6 +4,7 @@ from datetime import date, datetime, time, timedelta, timezone
 
 import pytest
 
+from health.features import daily as daily_mod
 from health.features import protocol as protocol_features
 from health.features import readiness
 from health.models import (CycleEvent, ExerciseTemplate, Observation,
@@ -67,6 +68,25 @@ def test_a_clean_day_gets_a_green_light(store):
 
     assert result.recommendation == readiness.PUSH
     assert not [c for c in result.caveats if "baseline" in c]
+
+
+def test_a_genuine_zero_acute_load_is_not_read_as_steady(store, monkeypatch):
+    # A real rest week (acute load truly 0, chronic > 0 -> ratio == 0.0) must
+    # not be coerced into ratio=1.0 ("steady") by a falsy-zero fallback: with
+    # every recovery signal clean, this fixture normally earns PUSH (see
+    # test_a_clean_day_gets_a_green_light), which requires 0.8 <= ratio <= 1.3.
+    # A `ratio or 1.0` bug would satisfy that on a true zero and still say
+    # PUSH; the fix must not.
+    _clean_day(store)
+    day = START + timedelta(days=39)
+    monkeypatch.setattr(readiness.daily, "training_load",
+                        lambda *a, **k: daily_mod.TrainingLoad(acute=0.0, chronic=10.0,
+                                                                days=28, method="ewma"))
+
+    result = readiness.readiness(store, day)
+
+    assert result.recommendation != readiness.PUSH
+    assert result.recommendation == readiness.PROCEED
 
 
 def test_recovery_and_load_together_force_a_pull_back(store):

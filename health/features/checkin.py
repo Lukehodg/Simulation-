@@ -208,6 +208,13 @@ def subjective_vs_objective(store: Store, day: date | None = None) -> dict:
                                  else "nothing flagged in the architecture",
                     "agreement": agreement})
 
+    # GI comfort is documented (GLP-1s lower it — appetite/GI effects are a
+    # named class effect) so this fires when relevant. Libido deliberately
+    # never will: testosterone's effect on it is not reliably one-directional
+    # in the literature, and `compounds.py` does not claim a direction for
+    # anything it isn't confident about — so a low libido rating with no
+    # matching compound is left out of `rows` entirely rather than annotated
+    # with a guess. That silence is the honest outcome here, not a bug.
     active = protocol_features.active(store, day)
     for field in (M.LIBIDO, M.GI_COMFORT):
         value = entry.ratings.get(field)

@@ -89,7 +89,7 @@ COMPOUNDS: dict[str, Compound] = {c.key: c for c in [
         key="retatrutide", label="Retatrutide", klass="glp1",
         raises=("resting_hr",),
         lowers=("body_mass", "energy_intake", "hba1c", "glucose",
-                "triglycerides", "appetite"),
+                "triglycerides", "appetite", "gi_comfort"),
         resting_hr_offset_bpm=(2.0, 5.0),
         onset_weeks=4.0,
         monitor=(
@@ -183,7 +183,7 @@ COMPOUNDS: dict[str, Compound] = {c.key: c for c in [
         key="glp1", label="GLP-1 agonist (general)", klass="glp1",
         raises=("resting_hr",),
         lowers=("body_mass", "energy_intake", "hba1c", "glucose",
-                "triglycerides", "appetite"),
+                "triglycerides", "appetite", "gi_comfort"),
         resting_hr_offset_bpm=(2.0, 4.0), onset_weeks=4.0,
         monitor=(("resting_hr", "small class-effect rise; a larger one is worth "
                                 "review"),
