@@ -26,6 +26,7 @@ from mcp.server.mcpserver import MCPServer
 
 from .analytes import ANALYTES, canonical_analyte
 from .config import Config, load_config
+from .features import checkin as checkin_features
 from .features import cycle as cycle_features
 from .features import daily, labs as lab_features
 from .features import protocol as protocol_features
@@ -58,6 +59,11 @@ How to use them well:
   way is the informative case. Escalate a trending monitoring marker to "worth a
   doctor". Never comment on the dose, ancillary drugs, or PCT — reporting a
   documented effect is not advising on the protocol.
+- `subjective_vs_objective` and `check_in` carry blood pressure and how the
+  person rated themselves. Report both directions of disagreement — feeling
+  worse than the data, and feeling better than it — not just the alarming one.
+  `blood_pressure`'s verdict of "see a doctor" is exactly that; never turn it
+  into dosing advice.
 - Never compare HRV across devices. WHOOP reports RMSSD, Apple reports SDNN,
   and they are stored under different metric names for that reason.
 - For anyone with a menstrual cycle, judge a reading with
@@ -465,6 +471,41 @@ def drivers_model(target: str = "hrv_rmssd", days: int = 90) -> dict[str, Any]:
         return readiness_features.drivers_model(store, target=target, days=days)
 
 
+@server.tool(description="Home blood pressure — the 7-day average, per-day "
+                         "history, a six-week trend, and a verdict (ok / watch "
+                         "/ see a doctor). Compound-aware: notes when an active "
+                         "androgen is documented to raise it. Never a dose.")
+@guarded
+def blood_pressure(days: int = 7, as_of: str | None = None) -> dict[str, Any]:
+    with _store() as store:
+        return checkin_features.blood_pressure(store, as_of=_day(as_of), days=days)
+
+
+@server.tool(description="Today's check-in (blood pressure, how they rated "
+                         "energy/mood/stress/sleep/libido/GI, and their note), "
+                         "or recent history. Pass history=true for the last "
+                         "`days` entries instead of just today.")
+@guarded
+def check_in(day: str | None = None, history: bool = False,
+            days: int = 14) -> dict[str, Any]:
+    with _store() as store:
+        if history:
+            return {"entries": [e.as_dict()
+                                for e in checkin_features.history(store, days=days)]}
+        entry = checkin_features.latest(store, _day(day))
+        return entry.as_dict() if entry else {"logged": False}
+
+
+@server.tool(description="Each check-in rating against the computed state for "
+                         "the same day — where they agree, and where how the "
+                         "person feels and what the numbers say pull apart. "
+                         "Both directions are worth reporting.")
+@guarded
+def subjective_vs_objective(day: str | None = None) -> dict[str, Any]:
+    with _store() as store:
+        return checkin_features.subjective_vs_objective(store, _day(day))
+
+
 @server.tool(description="A briefing for one day: what the body is saying, "
                          "against baselines and cycle phase where available.")
 @guarded
@@ -491,6 +532,12 @@ def daily_brief(day: str | None = None) -> dict[str, Any]:
         on = protocol_features.summary(store, today=target)
         if on.get("on"):
             brief["protocol"] = on
+        comparison = checkin_features.subjective_vs_objective(store, target)
+        if comparison.get("rows"):
+            brief["check_in"] = comparison
+        bp = checkin_features.blood_pressure(store, as_of=target)
+        if bp.get("verdict"):
+            brief["blood_pressure"] = bp
         cycle = cycle_features.summary(store, today=target)
         if cycle.get("cycles"):
             brief["cycle"] = {k: (str(v) if isinstance(v, date) else v)

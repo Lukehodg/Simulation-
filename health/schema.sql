@@ -185,6 +185,19 @@ CREATE TABLE IF NOT EXISTS protocol_days (
     PRIMARY KEY (local_date, compound)
 );
 
+-- What you said, once a day. The ratings and blood pressure also land in
+-- observations (so correlate/scan/trend work on them for free); this carries
+-- what doesn't fit there — the note, and the individual cuff readings behind
+-- the averaged bp_systolic/bp_diastolic/bp_pulse.
+CREATE TABLE IF NOT EXISTS checkins (
+    source      VARCHAR NOT NULL,   -- 'checkin'
+    local_date  DATE    NOT NULL,
+    note        VARCHAR,
+    readings    VARCHAR,            -- raw BP readings behind the average, e.g. "128/82,126/80"
+    ingested_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (source, local_date)
+);
+
 -- Derived: one row per day of every cycle we can reconstruct. Rebuilt from
 -- cycle_events by `health.features.cycle.rebuild`, never written by a source.
 CREATE TABLE IF NOT EXISTS cycle_days (

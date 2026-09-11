@@ -119,3 +119,20 @@ def test_six_week_drift_section_renders():
     page = render(Brief(text="", span="today", payload=payload))
     assert "Six-week drift" in page
     assert "downward drift" in page
+
+
+def test_checkin_section_and_bp_alert_render():
+    payload = _daily_payload()
+    payload["check_in"] = {
+        "rows": [{"dimension": "energy", "you_said": 1, "data_says": "readiness push",
+                  "agreement": "you feel worse than the data"}],
+        "note": "rough night", "summary": "energy: you feel worse than the data"}
+    payload["blood_pressure"] = {"verdict": "see a doctor", "average_systolic": 144,
+                                 "average_diastolic": 92,
+                                 "note": "worth a clinician's read"}
+
+    page = render(Brief(text="", span="today", payload=payload))
+
+    assert "How you said you feel" in page
+    assert "rough night" in page
+    assert 'class="alert"' in page and "144/92" in page

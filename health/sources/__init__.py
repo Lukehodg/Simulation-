@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from .apple_health import AppleHealthSource
 from .base import Source
+from .checkin import CheckInSource
 from .hevy import HevySource
 from .labs import LabsSource
 from .protocol import ProtocolSource
@@ -21,7 +22,8 @@ SOURCES: dict[str, type[Source]] = {
     "apple_health": AppleHealthSource,
     "labs": LabsSource,
     "protocol": ProtocolSource,
+    "checkin": CheckInSource,
 }
 
 __all__ = ["SOURCES", "Source", "WhoopSource", "HevySource", "AppleHealthSource",
-           "LabsSource", "ProtocolSource"]
+           "LabsSource", "ProtocolSource", "CheckInSource"]

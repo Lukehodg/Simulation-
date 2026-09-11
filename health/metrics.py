@@ -58,6 +58,21 @@ CAFFEINE = "caffeine"                       # mg
 WATER = "water"                             # ml
 ALCOHOL = "alcohol"                         # units
 
+# Blood pressure — hand-entered, from `health checkin`
+BP_SYSTOLIC = "bp_systolic"                 # mmHg
+BP_DIASTOLIC = "bp_diastolic"               # mmHg
+BP_PULSE = "bp_pulse"                       # bpm
+
+# How you say you feel — hand-entered, 1-5, from `health checkin`
+ENERGY = "energy"
+MOOD = "mood"
+STRESS = "stress"                           # higher = more stressed
+SLEEP_QUALITY = "sleep_quality"             # felt, not measured
+LIBIDO = "libido"
+GI_COMFORT = "gi_comfort"                   # higher = more comfortable
+
+CHECKIN_RATINGS = (ENERGY, MOOD, STRESS, SLEEP_QUALITY, LIBIDO, GI_COMFORT)
+
 UNITS: dict[str, str] = {
     HRV_RMSSD: "ms", HRV_SDNN: "ms", RESTING_HR: "bpm", HR_AVG: "bpm", HR_MAX: "bpm",
     RESPIRATORY_RATE: "br/min", SPO2: "%", VO2_MAX: "ml/kg/min",
@@ -68,6 +83,9 @@ UNITS: dict[str, str] = {
     STEPS: "count", ACTIVE_ENERGY: "kcal", BASAL_ENERGY: "kcal", EXERCISE_MINUTES: "min",
     ENERGY_INTAKE: "kcal", PROTEIN: "g", CARBS: "g", FAT: "g", FIBRE: "g",
     SODIUM: "mg", CAFFEINE: "mg", WATER: "ml", ALCOHOL: "units",
+    BP_SYSTOLIC: "mmHg", BP_DIASTOLIC: "mmHg", BP_PULSE: "bpm",
+    ENERGY: "1-5", MOOD: "1-5", STRESS: "1-5", SLEEP_QUALITY: "1-5",
+    LIBIDO: "1-5", GI_COMFORT: "1-5",
 }
 
 # Which source wins when several measure the same thing. Analyses read the
@@ -86,9 +104,13 @@ SOURCE_PRIORITY: dict[str, list[str]] = {
     PROTEIN: ["mfp_csv", "apple_health"],
     CARBS: ["mfp_csv", "apple_health"],
     FAT: ["mfp_csv", "apple_health"],
+    BP_SYSTOLIC: ["checkin"], BP_DIASTOLIC: ["checkin"], BP_PULSE: ["checkin"],
+    ENERGY: ["checkin"], MOOD: ["checkin"], STRESS: ["checkin"],
+    SLEEP_QUALITY: ["checkin"], LIBIDO: ["checkin"], GI_COMFORT: ["checkin"],
 }
 
-DEFAULT_PRIORITY = ["whoop", "garmin_fit", "garmin_export", "hevy", "mfp_csv", "apple_health"]
+DEFAULT_PRIORITY = ["whoop", "garmin_fit", "garmin_export", "hevy", "mfp_csv",
+                    "apple_health", "checkin"]
 
 
 def unit_for(metric: str) -> str | None:

@@ -202,6 +202,36 @@ def _hrs(value: Any) -> str:
     return "—" if value is None else f"{float(value):.1f}"
 
 
+_AGREEMENT_TONE = {"you feel worse than the data": "warn",
+                   "you feel better than the data": "warn", "match": "good"}
+
+
+def _checkin(check_in: dict, bp: dict) -> str:
+    rows = []
+    if bp.get("verdict"):
+        tone = "bad" if bp["verdict"] == "see a doctor" else \
+               "warn" if bp["verdict"] == "watch" else "good"
+        rows.append(
+            f'<div class="vital"><span class="k">Blood pressure</span>'
+            f'<span class="val">{bp["average_systolic"]:g}/{bp["average_diastolic"]:g}</span>'
+            f'<div class="bar"><span class="mid"></span>'
+            f'<span class="fill {tone}" style="left:50%;width:20%"></span></div>'
+            f'<span class="z {tone}">{_esc(bp["verdict"])}</span></div>')
+    for row in check_in.get("rows", []):
+        tone = _AGREEMENT_TONE.get(row["agreement"], "")
+        rows.append(
+            f'<li><b>{_esc(row["dimension"])}</b> {row["you_said"]:g}/5 — '
+            f'{_esc(row["data_says"])} '
+            f'<span class="z {tone}">({_esc(row["agreement"])})</span></li>')
+    body = "".join(rows[:1])  # the BP vital, if present
+    list_rows = rows[1:] if bp.get("verdict") else rows
+    if list_rows:
+        body += f'<ul class="list">{"".join(list_rows)}</ul>'
+    if check_in.get("note"):
+        body += f'<p class="list" style="border:none;padding-top:8px">"{_esc(check_in["note"])}"</p>'
+    return body
+
+
 def _sparklines(series: dict[str, list[dict]]) -> str:
     order = ["hrv_rmssd", "resting_hr", "recovery_score", "sleep_duration", "strain"]
     labels = {"hrv_rmssd": "HRV", "resting_hr": "Resting HR",
@@ -307,6 +337,17 @@ def render(brief: Brief) -> str:
     if debt:
         parts.append(f'<section><h3>Sleep</h3>{_sleep(debt)}'
                      f'{_architecture(p.get("sleep_architecture", {}))}</section>')
+
+    bp = p.get("blood_pressure") or {}
+    if bp.get("verdict") == "see a doctor":
+        parts.append(f'<div class="alert">⚠ blood pressure '
+                     f'{bp["average_systolic"]:g}/{bp["average_diastolic"]:g} — '
+                     f'{_esc(bp.get("note", ""))}</div>')
+
+    check_in = p.get("check_in") or p.get("check_in_today") or {}
+    if check_in.get("rows") or bp.get("verdict"):
+        parts.append(f'<section><h3>How you said you feel</h3>'
+                     f'{_checkin(check_in, bp)}</section>')
 
     if brief.text:
         parts.append(f'<section><h3>The read</h3><div class="prose">{_prose(brief.text)}</div></section>')

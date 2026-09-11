@@ -199,6 +199,25 @@ def protocol_indicator(store: Store, as_of: date | None = None) -> Indicator | N
         basis=[a.compound for a in active], n=len(active))
 
 
+def blood_pressure_indicator(store: Store, as_of: date | None = None) -> Indicator | None:
+    """Home BP, averaged and trended, from `health checkin` — not a score, a
+    verdict that only ever points at a clinician."""
+    from . import checkin as checkin_features
+
+    as_of = as_of or date.today()
+    bp = checkin_features.blood_pressure(store, as_of=as_of)
+    if not bp.get("verdict"):
+        return None
+    status = {"ok": STATUS_OK, "watch": STATUS_WATCH,
+             "see a doctor": STATUS_ATTENTION}[bp["verdict"]]
+    detail = f"{bp['average_systolic']:g}/{bp['average_diastolic']:g} " \
+             f"({bp['days']}-day average, {bp['readings']} reading(s))"
+    if bp.get("note"):
+        detail += f" — {bp['note']}"
+    return Indicator("Blood pressure", status, STRONG, detail,
+                     basis=["bp_systolic", "bp_diastolic"], n=bp["readings"])
+
+
 def completeness(store: Store, as_of: date | None = None) -> dict:
     """How much of the relevant data actually exists.
 
@@ -252,9 +271,11 @@ def all_indicators(store: Store, as_of: date | None = None) -> dict:
     """
     as_of = as_of or date.today()
     protocol = protocol_indicator(store, as_of)
+    bp = blood_pressure_indicator(store, as_of)
     indicators = [recovery_indicator(store, as_of), sleep_indicator(store, as_of),
                   training_indicator(store, as_of),
                   *([protocol] if protocol else []),
+                  *([bp] if bp else []),
                   *blood_indicators(store)]
     return {
         "as_of": str(as_of),

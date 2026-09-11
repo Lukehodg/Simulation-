@@ -205,3 +205,22 @@ def test_the_payload_carries_the_protocol_and_a_pre_panel_list(store):
     payload = redacted_payload(store)
     assert payload["protocol"]["on"][0]["compound"] == "testosterone"
     assert payload["pre_panel_for_next_time"]
+
+
+def test_blood_pressure_indicator_status_follows_the_verdict(store, monkeypatch):
+    from health.features import checkin as checkin_features
+
+    monkeypatch.setattr(checkin_features, "blood_pressure",
+                        lambda s, as_of=None, days=7: {
+                            "verdict": "see a doctor", "average_systolic": 144,
+                            "average_diastolic": 92, "days": 7, "readings": 7,
+                            "note": "worth a clinician's read"})
+
+    found = indicators.blood_pressure_indicator(store)
+
+    assert found.status == indicators.STATUS_ATTENTION
+    assert "144/92" in found.detail
+
+
+def test_blood_pressure_indicator_absent_when_nothing_logged(store):
+    assert indicators.blood_pressure_indicator(store) is None

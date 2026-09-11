@@ -157,6 +157,13 @@ class ProtocolEvent(_Base):
     note: str | None = None
 
 
+class CheckIn(_Base):
+    source: str
+    local_date: date
+    note: str | None = None
+    readings: str | None = None   # the raw BP readings behind the average
+
+
 @dataclass
 class Records:
     """Whatever one raw payload turned out to contain."""
@@ -170,6 +177,7 @@ class Records:
     nutrition_items: list[NutritionItem] = field(default_factory=list)
     cycle_events: list[CycleEvent] = field(default_factory=list)
     protocol_events: list[ProtocolEvent] = field(default_factory=list)
+    checkins: list[CheckIn] = field(default_factory=list)
     lab_results: list[LabResult] = field(default_factory=list)
     #: Workouts the source says were deleted upstream. Parsers report them;
     #: the store applies them, so that a session you deleted in the app on

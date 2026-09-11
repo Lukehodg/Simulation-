@@ -187,11 +187,15 @@ def _start_date(store: Store, compound: str) -> str:
     return str(rows[0][0]) if rows and rows[0][0] else "an unknown date"
 
 
+#: a monitor marker's name, where it isn't itself a stored metric
+_MARKER_METRIC = {"blood_pressure": "bp_systolic"}
+
+
 def monitoring(store: Store, day: date | None = None) -> list[dict]:
     """Markers a clinician should be watching, with their current direction."""
     day = day or date.today()
     tracked = {"resting_hr", "hrv_rmssd", "body_mass", "respiratory_rate",
-               "hdl", "haematocrit"}
+               "hdl", "haematocrit", "bp_systolic", "bp_diastolic"}
     out = []
     for a in active(store, day):
         spec = C.COMPOUNDS.get(a.compound)
@@ -199,8 +203,9 @@ def monitoring(store: Store, day: date | None = None) -> list[dict]:
             continue
         for marker, why in spec.monitor:
             drift = None
-            if marker in tracked:
-                t = trend_features.metric_trend(store, marker, as_of=day)
+            metric = _MARKER_METRIC.get(marker, marker)
+            if metric in tracked:
+                t = trend_features.metric_trend(store, metric, as_of=day)
                 if t.verdict in ("rising", "falling"):
                     drift = t.describe()
             out.append({"compound": a.compound, "marker": marker, "why": why,

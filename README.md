@@ -29,8 +29,9 @@ Built and tested:
 | **Readiness & drivers** | A readiness-to-train call, personal sleep debt, what actually moves your recovery (confounder-aware), strength vs. recovery, a phase-aware month |
 | **Drift & sleep** | Six-week trend detection (is the baseline itself moving), sleep architecture vs. your own baseline, an illness early-warning from resting HR + respiration + skin temp |
 | **Protocol** | Compounds you're on as an axis of interpretation — documented effects, monitoring markers, pre-panel checklist; escalation, never dosing |
+| **Check-in** | Daily blood pressure (averaged, trended, escalated) and how you feel — read against the computed state, not just logged |
 | **Brief** | `health brief` — the day (or the week) read back to you in two paragraphs, on a schedule if you want it |
-| **Agent tools** | 29 MCP tools — the surface Claude actually talks to |
+| **Agent tools** | 32 MCP tools — the surface Claude actually talks to |
 | **Interface** | A local page on 127.0.0.1, served from the same database |
 | **Bloods page** | Drop a report in, see what is flagged, ask Claude to read it |
 | **Indicators** | Per-domain status with the evidence behind each — deliberately no single score |
@@ -229,6 +230,35 @@ system tracks, and the markers a clinician should watch. From that:
   climbing resting HR — these go to "worth a doctor's review". The system holds
   a hard line: it reports documented effects and never comments on the dose,
   ancillary drugs, or PCT.
+
+## Check-in
+
+Blood pressure and how you feel, entered by hand once a day:
+
+```sh
+health checkin                        # walks the questions, then blood pressure
+health checkin --bp 128/82 --bp 126/80 --pulse 61 \
+  --energy 3 --mood 4 --stress 3 --sleep 2 --libido 3 --gi 4 \
+  --note "slept badly, work stress"
+health checkin --history              # the last two weeks
+```
+
+Blood pressure is 2-3 cuff readings averaged, because a single reading is
+noisy — standard home-BP practice. The average becomes real metrics
+(`bp_systolic`, `bp_diastolic`, `bp_pulse`), so `metric_trend`, baselines and
+the protocol monitoring all read it like anything else. A 7-day average past
+135/85 — the line that matters on an androgen — or a rising six-week trend
+gets a `watch` verdict; past 140/90, `see a doctor`. Always a verdict, never a
+dose.
+
+The six ratings (energy, mood, stress, sleep quality as it *felt*, libido, GI
+comfort — all 1-5) land in `observations` too, so they are correlatable like
+any other metric: `health sql "SELECT * FROM daily_metrics WHERE metric =
+'energy'"` or ask the agent to scan for what moves them. The point of logging
+them is the comparison that comes straight back after each entry — where how
+you feel and what the wearables say agree, and where they don't. Both
+directions are worth knowing: fatigue the watch hasn't caught yet, or a green
+day that feels wrong for a reason nothing here measures.
 
 ## Blood tests
 
@@ -525,7 +555,7 @@ the agent:
 claude mcp add health -- /path/to/.venv/bin/health mcp --root /path/to/project
 ```
 
-That exposes 29 tools — baselines, deviations, correlations, training load,
+That exposes 32 tools — baselines, deviations, correlations, training load,
 lift progression, cycle phase, blood results, literature search, the readiness
 call and its cross-domain siblings, and a daily brief that pulls them together.
 Then you can just ask:

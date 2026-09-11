@@ -24,6 +24,7 @@ from typing import Any
 
 from .config import Config
 from .features import daily, readiness
+from .features import checkin as checkin_features
 from .features import cycle as cycle_features
 from .features import protocol as protocol_features
 from .features import sleep as sleep_features
@@ -74,6 +75,17 @@ Ground rules:
   trending, escalate it: "this is worth a doctor's review". Never comment on the
   protocol itself — not the dose, not ancillary drugs, not PCT, not whether to
   run it. Reporting a documented effect is not advising on the compound.
+
+- CHECK-IN. If `check_in` is present, the person logged blood pressure and/or
+  how they feel today. `subjective_vs_objective` already compares each rating
+  to the computed state — report where they agree, and say plainly where they
+  don't; both directions are informative (pushing through a fatigue the watch
+  hasn't caught, or a green day that feels wrong for a reason nothing here
+  measures). Treat the free-text note as context for the day, not as the
+  headline. Blood pressure has its own `verdict` field
+  (`ok`/`watch`/`see a doctor`) — report that verdict, never a dose or a change
+  to medication. If `check_in` says nothing was logged today, you may mention
+  it is missing but do not nag.
 
 - NO SCORE. Do not invent an overall readiness or health score, grade, or
   percentage. The readiness field is a recommendation with reasons; report it
@@ -161,6 +173,13 @@ def daily_payload(store: Store, day: date | None = None) -> dict[str, Any]:
     protocol = protocol_features.summary(store, today=day)
     if protocol.get("on"):
         payload["protocol"] = protocol
+
+    comparison = checkin_features.subjective_vs_objective(store, day)
+    payload["check_in"] = (comparison if comparison.get("rows")
+                           else {"logged": False, "prompt": comparison.get("note")})
+    bp = checkin_features.blood_pressure(store, as_of=day)
+    if bp.get("verdict"):
+        payload["blood_pressure"] = bp
     return payload
 
 
@@ -199,6 +218,9 @@ def weekly_payload(store: Store, end: date | None = None) -> dict[str, Any]:
         "training_observations": training_features.observations(store, as_of=end),
         "phase_training_plan": readiness.phase_training_plan(store, today=end),
         "protocol": protocol_features.summary(store, today=end),
+        "check_in_today": checkin_features.subjective_vs_objective(store, end),
+        "blood_pressure": checkin_features.blood_pressure(store, as_of=end),
+        "divergence_history": checkin_features.divergence_history(store, as_of=end),
     }
 
 

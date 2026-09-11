@@ -13,6 +13,7 @@
     health research "question"  search the literature, with citations
     health cycle [--metric M]   where you are, and how a metric moves by phase
     health protocol [add ...]   what you're on, as context for the analysis
+    health checkin [--bp S/D]   blood pressure and how you feel, vs the numbers
     health lifts [EXERCISE]     strength progression, or one exercise's history
     health volume [--weeks N]   weekly tonnage by muscle group
     health sql "SELECT ..."     ask the database directly
@@ -172,6 +173,112 @@ def _print_protocol(summary: dict) -> None:
         print("\nnext blood panel should include: "
               + ", ".join(summary["pre_panel"]))
     print(f"\n{summary['boundary']}")
+
+
+def _parse_bp(text: str) -> tuple[float, float]:
+    try:
+        sys_str, dia_str = text.strip().split("/")
+        return float(sys_str), float(dia_str)
+    except ValueError:
+        raise SystemExit(f"{text!r} is not S/D, e.g. 128/82")
+
+
+def _interactive_checkin(pulse: int | None) -> dict:
+    from .features import checkin as checkin_features
+
+    entry: dict = {}
+    print("Blood pressure — enter each reading as S/D, blank when done.")
+    readings = []
+    while True:
+        raw = input(f"  reading {len(readings) + 1}: ").strip()
+        if not raw:
+            break
+        sys_, dia_ = _parse_bp(raw)
+        readings.append([sys_, dia_, pulse])
+    if readings:
+        entry["bp_readings"] = readings
+
+    for field, question, hint in checkin_features.prompts():
+        raw = input(f"{question} ({hint}, blank to skip): ").strip()
+        if raw:
+            entry[field] = int(raw)
+
+    note = input("Anything else? (blank to skip): ").strip()
+    if note:
+        entry["note"] = note
+    return entry
+
+
+def cmd_checkin(args, config) -> int:
+    from .features import checkin as checkin_features
+
+    if args.history:
+        with _store(config, read_only=True) as store:
+            entries = checkin_features.history(store, days=args.days)
+        if not entries:
+            print("Nothing logged yet. Run `health checkin`.")
+            return 0
+        abbrev = {"energy": "energy", "mood": "mood", "stress": "stress",
+                 "sleep_quality": "sleep", "libido": "libido", "gi_comfort": "GI"}
+        for entry in entries:
+            d = entry.as_dict()
+            line = str(entry.day)
+            if d["blood_pressure"]:
+                line += f"  bp {d['blood_pressure']}"
+            if entry.ratings:
+                line += "  " + " ".join(f"{abbrev.get(k, k)}={v:g}"
+                                        for k, v in entry.ratings.items())
+            print(line)
+            if d["note"]:
+                print(f"    {d['note']}")
+        return 0
+
+    config.ensure_dirs()
+    fields = ("energy", "mood", "stress", "sleep", "libido", "gi")
+    metric_names = {"sleep": "sleep_quality", "gi": "gi_comfort"}
+    given = {metric_names.get(f, f): getattr(args, f) for f in fields
+            if getattr(args, f) is not None}
+
+    if args.bp or given or args.note:
+        readings = [[*_parse_bp(b), args.pulse] for b in (args.bp or [])]
+        entry = {**given}
+        if readings:
+            entry["bp_readings"] = readings
+        if args.note:
+            entry["note"] = args.note
+    else:
+        entry = _interactive_checkin(args.pulse)
+
+    if not entry:
+        print("Nothing to log.")
+        return 0
+    entry["date"] = str(date.today())
+
+    source = build_source("checkin", config)
+    try:
+        landed = source.add(entry)
+    except ValueError as exc:
+        raise SystemExit(str(exc))
+    with _store(config) as store:
+        store.load(source.parse(landed))
+        store.record_raw(landed, "checkin", "entry", datetime.now(timezone.utc),
+                         parsed=True)
+        logged_bp = "bp_readings" in entry
+        comparison = checkin_features.subjective_vs_objective(store)
+        bp = checkin_features.blood_pressure(store) if logged_bp else None
+
+    print("logged.")
+    if comparison.get("rows"):
+        print(f"\n{comparison['summary']}")
+        for row in comparison["rows"]:
+            print(f"  {row['dimension']}: you said {row['you_said']:g} — "
+                  f"{row['data_says']} ({row['agreement']})")
+    if bp and bp.get("verdict"):
+        print(f"\nblood pressure: {bp['average_systolic']:g}/{bp['average_diastolic']:g} "
+              f"today — {bp['verdict']}")
+        if bp.get("note"):
+            print(f"  {bp['note']}")
+    return 0
 
 
 def cmd_replay(args, config) -> int:
@@ -787,6 +894,26 @@ def build_parser() -> argparse.ArgumentParser:
                               help="date of a change or stop")
     protocol_cmd.add_argument("--note")
     protocol_cmd.set_defaults(fn=cmd_protocol)
+
+    checkin_cmd = sub.add_parser("checkin", help="blood pressure and how you "
+                                                 "feel, read against the numbers")
+    checkin_cmd.add_argument("--bp", action="append", metavar="S/D",
+                             help="a cuff reading, e.g. 128/82 — repeat for "
+                                  "more than one")
+    checkin_cmd.add_argument("--pulse", type=int)
+    checkin_cmd.add_argument("--energy", type=int, choices=range(1, 6))
+    checkin_cmd.add_argument("--mood", type=int, choices=range(1, 6))
+    checkin_cmd.add_argument("--stress", type=int, choices=range(1, 6))
+    checkin_cmd.add_argument("--sleep", type=int, choices=range(1, 6),
+                             help="how last night felt, 1-5")
+    checkin_cmd.add_argument("--libido", type=int, choices=range(1, 6))
+    checkin_cmd.add_argument("--gi", type=int, choices=range(1, 6),
+                             help="GI comfort, 1-5")
+    checkin_cmd.add_argument("--note")
+    checkin_cmd.add_argument("--history", action="store_true",
+                             help="show recent check-ins instead of logging one")
+    checkin_cmd.add_argument("--days", type=int, default=14)
+    checkin_cmd.set_defaults(fn=cmd_checkin)
 
     research = sub.add_parser("research", help="search the literature")
     research.add_argument("query", nargs="?", help="what to search for")

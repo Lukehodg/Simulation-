@@ -74,3 +74,9 @@ def test_the_system_prompt_holds_the_house_rules():
     # the compound guardrail
     assert "not ancillary drugs, not PCT" in brief.SYSTEM
     assert "Reporting a documented effect is not advising on the compound" in brief.SYSTEM
+
+
+def test_the_system_prompt_reports_the_checkin_but_never_a_dose():
+    assert "CHECK-IN." in brief.SYSTEM
+    assert "both directions are informative" in brief.SYSTEM
+    assert "never a dose or a change" in brief.SYSTEM
