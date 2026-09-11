@@ -14,8 +14,11 @@ the reference attached, so that you can check it.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
-from typing import Iterable
+from datetime import date, timedelta
+from typing import TYPE_CHECKING, Iterable
+
+if TYPE_CHECKING:
+    from .store import Store
 
 import httpx
 
@@ -149,3 +152,86 @@ def evidence_query(analyte: str, direction: str | None = None,
     if context:
         parts.append(context)
     return " ".join(parts)
+
+
+#: Metric names read badly as search terms on their own; a few are worth
+#: spelling out. Anything absent just has its underscores swapped for spaces.
+_METRIC_LABELS = {
+    "hrv_rmssd": "heart rate variability", "resting_hr": "resting heart rate",
+    "sleep_duration": "sleep duration", "sleep_efficiency": "sleep efficiency",
+    "recovery_score": "recovery", "strain": "training strain",
+    "skin_temp_deviation": "skin temperature", "respiratory_rate": "respiratory rate",
+    "steps": "daily steps", "energy_intake": "calorie intake", "protein": "protein intake",
+    "bp_systolic": "systolic blood pressure", "bp_diastolic": "diastolic blood pressure",
+    "energy": "energy levels", "sleep_quality": "sleep quality",
+    "last_workout_hour": "exercise timing", "strength_tonnage": "resistance training volume",
+    "body_mass": "body weight",
+}
+
+
+def _metric_label(metric: str) -> str:
+    return _METRIC_LABELS.get(metric, metric.replace("_", " "))
+
+
+def weekly_pattern_query(store: "Store", end: date | None = None) -> dict | None:
+    """The week's most notable pattern, turned into something worth searching
+    for — the same idea `evidence_query` applies to a lab result, for whatever
+    the training and recovery data turned up instead.
+
+    Checked in order of evidentiary weight, strongest first: a completed
+    pre-registered experiment beats a bare correlation, and a compound
+    monitoring marker actually moving beats either, because it is the one with
+    a safety dimension. Returns `None` on a quiet week — there is no
+    obligation to manufacture a pattern that is not there.
+    """
+    from . import compounds as compounds_kb
+    from .features import experiment as experiment_features
+    from .features import protocol as protocol_features
+    from .features import readiness as readiness_features
+    from .features import trend as trend_features
+
+    end = end or date.today()
+    start = end - timedelta(days=6)
+
+    for exp in experiment_features.all_experiments(store):
+        blocks = experiment_features.block_windows(exp)
+        finished_this_week = any(start <= b.end <= end for b in blocks)
+        just_completed = (experiment_features.status(exp, as_of=end) == "complete"
+                          and blocks[-1].end <= end)
+        if not (finished_this_week or just_completed):
+            continue
+        result = experiment_features.analyse(store, exp, as_of=end)
+        if result.get("verdict") and result["verdict"] != "too early":
+            exposure_label = _metric_label(exp.exposure_metric or "the exposure")
+            outcome_label = _metric_label(exp.outcome_metric)
+            return {"pattern": f'your experiment "{exp.hypothesis}" — {result["verdict"]}',
+                   "query": f"{exposure_label} {outcome_label}", "source": "experiment"}
+
+    monitoring = [m for m in protocol_features.monitoring(store, end)
+                 if m.get("current_trend")]
+    if monitoring:
+        marker = monitoring[0]
+        spec = compounds_kb.COMPOUNDS.get(marker["compound"])
+        compound_label = spec.label if spec else marker["compound"]
+        return {"pattern": f"{marker['marker']} is {marker['current_trend']} while "
+                           f"on {compound_label.lower()}",
+               "query": f"{compound_label} {_metric_label(marker['marker'])}",
+               "source": "protocol"}
+
+    drivers = readiness_features.recovery_drivers(store, end=end)
+    survivors = drivers.get("survivors", [])
+    if survivors:
+        top = max(survivors, key=lambda f: abs(f["r"]))
+        input_label = _metric_label(top["input"])
+        target_label = _metric_label(top["recovery_metric"])
+        return {"pattern": f"{input_label} correlates with {target_label} "
+                           f"(r={top['r']:+.2f})",
+               "query": f"{input_label} {target_label}", "source": "recovery_driver"}
+
+    trends = trend_features.trends(store, as_of=end)
+    if trends:
+        top = trends[0]
+        return {"pattern": top.describe(), "query": _metric_label(top.metric),
+               "source": "trend"}
+
+    return None

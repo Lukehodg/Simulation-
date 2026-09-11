@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any
 
+from . import research as research_api
 from .config import Config
 from .features import daily, readiness
 from .features import checkin as checkin_features
@@ -97,6 +98,15 @@ Ground rules:
   "proven" — the verdict field already gives you the honest wording, use it.
   This is one person's twelve weeks, not a finding about anyone else; frame it
   as something for them to decide with, not a general truth.
+
+- WEEKLY RESEARCH. `weekly_research`, when present, is the one place per week
+  outside evidence enters this brief — literature retrieved for the week's
+  most notable pattern (`pattern` says what and why it was picked). Cite only
+  the papers you were given, name each one's study design, and say plainly
+  when the list is empty or the evidence is thin. This is the same discipline
+  `analysis.py` holds for a blood result: retrieval, not a verdict — a paper
+  about caffeine and HRV in general does not prove what caused this person's
+  week.
 
 - NO SCORE. Do not invent an overall readiness or health score, grade, or
   percentage. The readiness field is a recommendation with reasons; report it
@@ -193,6 +203,26 @@ def _finished_experiment_analyses(store: Store, start: date, end: date) -> list[
     return out
 
 
+def _weekly_research(store: Store, end: date) -> dict[str, Any] | None:
+    """The week's one piece of outside evidence, if there is a pattern worth
+    it — the literature equivalent of `analysis.gather_literature`, for
+    training and recovery findings instead of a blood result."""
+    pattern = research_api.weekly_pattern_query(store, end=end)
+    if pattern is None:
+        return None
+    try:
+        papers = research_api.search(
+            pattern["query"], limit=4, since_year=2015,
+            designs=["Meta-Analysis", "Systematic Review",
+                    "Randomized Controlled Trial", "Review"])
+    except Exception as exc:  # noqa: BLE001 - reported, not fatal to the brief
+        return {**pattern, "papers": [], "error": f"{type(exc).__name__}: {exc}"}
+    return {**pattern, "papers": [
+        {"title": p.title, "design": p.design, "journal": p.journal, "year": p.year,
+         "cited_by": p.cited_by, "url": p.url, "abstract": (p.abstract or "")[:1200]}
+        for p in papers]}
+
+
 def daily_payload(store: Store, day: date | None = None) -> dict[str, Any]:
     """Everything the daily brief is written from, and nothing else."""
     day = day or date.today()
@@ -278,6 +308,9 @@ def weekly_payload(store: Store, end: date | None = None) -> dict[str, Any]:
     finished = _finished_experiment_analyses(store, start, end)
     if finished:
         payload["experiment_results"] = finished
+    research_result = _weekly_research(store, end)
+    if research_result:
+        payload["weekly_research"] = research_result
     return payload
 
 

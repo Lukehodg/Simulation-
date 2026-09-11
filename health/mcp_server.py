@@ -35,7 +35,7 @@ from .features import readiness as readiness_features
 from .features import sleep as sleep_features
 from .features import strength as strength_features
 from .features import trend as trend_features
-from .research import evidence_query, search
+from .research import evidence_query, search, weekly_pattern_query
 from .store import Store
 
 INSTRUCTIONS = """
@@ -350,6 +350,26 @@ def search_literature(query: str, limit: int = 6,
                     designs=["Meta-Analysis", "Systematic Review",
                              "Randomized Controlled Trial", "Review"])
     return {"query": query, "papers": [
+        {"title": p.title, "design": p.design, "journal": p.journal,
+         "year": p.year, "cited_by": p.cited_by, "open_access": p.open_access,
+         "url": p.url, "abstract": (p.abstract or "")[:1200]} for p in papers]}
+
+
+@server.tool(description="The week's most notable pattern — a completed "
+                         "experiment, a compound marker in motion, a recovery "
+                         "driver, or a six-week trend, in that priority order "
+                         "— turned into a literature search. None if the week "
+                         "was quiet. Retrieval only, same as search_literature.")
+@guarded
+def weekly_research_pattern(limit: int = 4) -> dict[str, Any]:
+    with _store() as store:
+        pattern = weekly_pattern_query(store)
+    if pattern is None:
+        return {"pattern": None, "note": "nothing notable this week"}
+    papers = search(pattern["query"], limit=limit, since_year=2015,
+                    designs=["Meta-Analysis", "Systematic Review",
+                            "Randomized Controlled Trial", "Review"])
+    return {**pattern, "papers": [
         {"title": p.title, "design": p.design, "journal": p.journal,
          "year": p.year, "cited_by": p.cited_by, "open_access": p.open_access,
          "url": p.url, "abstract": (p.abstract or "")[:1200]} for p in papers]}

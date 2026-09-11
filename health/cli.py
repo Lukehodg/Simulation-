@@ -785,23 +785,7 @@ def cmd_labs(args, config) -> int:
     return 0
 
 
-def cmd_research(args, config) -> int:
-    if args.analyte:
-        key = canonical_analyte(args.analyte) or args.analyte
-        direction = None
-        with _store(config, read_only=True) as store:
-            history = lab_features.history(store, key)
-        if history:
-            latest = history[-1]
-            direction = latest.flag if latest.flag in ("low", "high") else None
-            print(f"your most recent {latest.label}: {latest.value:.4g} {latest.unit} "
-                  f"({latest.flag}, range {latest.range_text})\n")
-        terms = research_api.evidence_query(key, direction, args.context)
-    else:
-        terms = args.query
-    if not terms:
-        raise SystemExit("Give a question, or --analyte ferritin")
-
+def _search_and_print(terms: str, args) -> int:
     designs = None if args.all else ["Meta-Analysis", "Systematic Review",
                                      "Randomized Controlled Trial", "Review"]
     print(f'searching: "{terms}"\n')
@@ -818,6 +802,40 @@ def cmd_research(args, config) -> int:
     for index, paper in enumerate(papers, 1):
         _print_paper(index, paper)
         print()
+    print("Study design and citation count are shown so you can weigh these "
+         "yourself. They describe the paper, not whether it applies to you.")
+    return 0
+
+
+def cmd_research(args, config) -> int:
+    if args.weekly:
+        with _store(config, read_only=True) as store:
+            pattern = research_api.weekly_pattern_query(store)
+        if pattern is None:
+            print("Nothing notable this week — no completed experiment, no "
+                 "compound marker in motion, no recovery driver or six-week "
+                 "trend cleared its threshold.")
+            return 0
+        print(f"{pattern['pattern']}\n")
+        return _search_and_print(pattern["query"], args)
+
+    if args.analyte:
+        key = canonical_analyte(args.analyte) or args.analyte
+        direction = None
+        with _store(config, read_only=True) as store:
+            history = lab_features.history(store, key)
+        if history:
+            latest = history[-1]
+            direction = latest.flag if latest.flag in ("low", "high") else None
+            print(f"your most recent {latest.label}: {latest.value:.4g} {latest.unit} "
+                  f"({latest.flag}, range {latest.range_text})\n")
+        terms = research_api.evidence_query(key, direction, args.context)
+    else:
+        terms = args.query
+    if not terms:
+        raise SystemExit("Give a question, or --analyte ferritin")
+
+    return _search_and_print(terms, args)
     print("Study design and citation count are shown so you can weigh these "
           "yourself. They describe the paper, not whether it applies to you.")
     return 0
@@ -1088,6 +1106,9 @@ def build_parser() -> argparse.ArgumentParser:
     research = sub.add_parser("research", help="search the literature")
     research.add_argument("query", nargs="?", help="what to search for")
     research.add_argument("--analyte", help="search around one of your results")
+    research.add_argument("--weekly", action="store_true",
+                          help="auto-pick the week's most notable pattern and "
+                               "search around that")
     research.add_argument("--context", help="extra terms, e.g. 'endurance athletes'")
     research.add_argument("--since", type=int, default=2015, help="earliest year")
     research.add_argument("--limit", type=int, default=8)

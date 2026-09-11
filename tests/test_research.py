@@ -64,3 +64,102 @@ def test_a_lab_result_becomes_a_direction_specific_query():
     assert research.evidence_query("vitamin_d", "low", "endurance athletes") == (
         "low Vitamin D endurance athletes")
     assert research.evidence_query("ferritin", None) == "Ferritin"
+
+
+# -- weekly_pattern_query --------------------------------------------------
+
+from datetime import date, datetime, time, timedelta, timezone
+
+from health.features import protocol as protocol_features
+from health.models import (ExperimentEvent, Observation, ProtocolEvent,
+                           Records)
+
+WSTART = date(2026, 4, 1)
+WEND = WSTART + timedelta(days=79)
+
+
+def _obs(store, metric, values, start=WSTART, source="whoop"):
+    store.load(Records(observations=[
+        Observation(ts=datetime.combine(start + timedelta(days=i), time(6),
+                                        tzinfo=timezone.utc),
+                    local_date=start + timedelta(days=i), metric=metric,
+                    value=v, unit="x", source=source,
+                    source_id=f"{metric}-{(start + timedelta(days=i)).isoformat()}")
+        for i, v in enumerate(values)]))
+
+
+def test_a_quiet_week_returns_none(store):
+    assert research.weekly_pattern_query(store, end=WEND) is None
+
+
+def test_a_six_week_trend_is_picked_when_nothing_else_is_there(store):
+    _obs(store, "respiratory_rate", [14.0 - 0.05 * i for i in range(80)])
+
+    result = research.weekly_pattern_query(store, end=WEND)
+
+    assert result["source"] == "trend"
+    assert "respiratory" in result["query"]
+
+
+def test_a_recovery_driver_outranks_a_bare_trend(store):
+    import random
+    random.seed(4)
+    strain = [random.gauss(12, 4) for _ in range(80)]
+    hrv = [70.0] + [90 - 1.5 * s + random.gauss(0, 2) for s in strain[:-1]]
+    _obs(store, "strain", strain)
+    _obs(store, "hrv_rmssd", hrv)
+    _obs(store, "respiratory_rate", [14.0 - 0.05 * i for i in range(80)])  # also a real trend
+
+    result = research.weekly_pattern_query(store, end=WEND)
+
+    assert result["source"] == "recovery_driver"
+
+
+def test_a_trending_monitoring_marker_outranks_a_driver(store):
+    import random
+    random.seed(4)
+    strain = [random.gauss(12, 4) for _ in range(80)]
+    hrv = [70.0] + [90 - 1.5 * s + random.gauss(0, 2) for s in strain[:-1]]
+    _obs(store, "strain", strain)
+    _obs(store, "hrv_rmssd", hrv)
+    # blood pressure climbing steadily while on testosterone -> a monitored
+    # marker (testosterone's "blood_pressure" marker resolves to bp_systolic)
+    _obs(store, "bp_systolic", [118.0 + 0.2 * i for i in range(80)], source="checkin")
+    store.load(Records(protocol_events=[ProtocolEvent(
+        source="protocol", local_date=WSTART, event="start", compound="testosterone",
+        dose=200, unit="mg", freq="weekly")]))
+    protocol_features.rebuild(store)
+
+    result = research.weekly_pattern_query(store, end=WEND)
+
+    assert result["source"] == "protocol"
+    assert "testosterone" in result["query"].lower()
+
+
+def test_a_completed_experiment_outranks_everything(store):
+    store.load(Records(experiment_events=[ExperimentEvent(
+        source="experiment", local_date=WSTART, event="start", experiment_id="e1",
+        hypothesis="magnesium and deep sleep", exposure_type="manual",
+        outcome_metric="sleep_duration", predicted_direction="raises", block_days=7,
+        blocks_planned=6, start_date=WSTART, starting_condition="A")]))
+    from health.features import experiment as experiment_features
+    exp = experiment_features.load(store, "e1")
+    for block in experiment_features.block_windows(exp):
+        val = 480.0 if block.condition == "B" else 400.0
+        day = block.start
+        while day <= block.end:
+            _obs(store, "sleep_duration", [val], start=day)
+            day += timedelta(days=1)
+    # also seed a driver-worthy pair, to prove the experiment still wins
+    import random
+    random.seed(4)
+    strain = [random.gauss(12, 4) for _ in range(80)]
+    hrv = [70.0] + [90 - 1.5 * s + random.gauss(0, 2) for s in strain[:-1]]
+    _obs(store, "strain", strain)
+    _obs(store, "hrv_rmssd", hrv)
+
+    end = experiment_features.block_windows(exp)[-1].end + timedelta(days=1)
+    result = research.weekly_pattern_query(store, end=end)
+
+    assert result["source"] == "experiment"
+    assert "magnesium" in result["pattern"]
