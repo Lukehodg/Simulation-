@@ -1,4 +1,4 @@
-"""How you feel, and your blood pressure, entered by hand.
+"""How you feel, your blood pressure, and the morning weigh-in, entered by hand.
 
 There is no API for either. `health checkin` builds one day's entry and this
 lands it in raw/ exactly like a blood panel or a protocol event, so
@@ -50,9 +50,12 @@ class CheckInSource(Source):
             if not (60 <= sys_ <= 260 and 30 <= dia_ <= 200):
                 raise ValueError(f"{sys_}/{dia_} doesn't look like a blood "
                                  f"pressure reading")
-        if not readings and not any(entry.get(f) is not None
-                                    for f in M.CHECKIN_RATINGS) and not entry.get("note"):
-            raise ValueError("nothing to log — give a reading, a rating, or a note")
+        weight = entry.get("weight_kg")
+        if weight is not None and not (30 <= float(weight) <= 300):
+            raise ValueError(f"{weight!r} kg doesn't look like a bodyweight")
+        if (not readings and weight is None and not entry.get("note")
+                and not any(entry.get(f) is not None for f in M.CHECKIN_RATINGS)):
+            raise ValueError("nothing to log — give a reading, a weight, a rating, or a note")
         return rawstore.write(self.config.raw_dir, self.name, "entry", entry)
 
     def parse(self, path: Path) -> Records:
@@ -74,6 +77,7 @@ class CheckInSource(Source):
 
         for field in M.CHECKIN_RATINGS:
             observe(field, entry.get(field))
+        observe(M.BODY_MASS, entry.get("weight_kg"))
 
         readings = entry.get("bp_readings") or []
         if readings:

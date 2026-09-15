@@ -13,8 +13,9 @@
     health research "question"  search the literature, with citations
     health cycle [--metric M]   where you are, and how a metric moves by phase
     health protocol [add ...]   what you're on, as context for the analysis
-    health checkin [--bp S/D]   blood pressure and how you feel, vs the numbers
+    health checkin [--bp S/D]   blood pressure, weight and how you feel, vs the numbers
     health experiment start ... pre-register an n-of-1 trial and test it
+    health plan [--push]        today's session from your own sets, into Hevy
     health lifts [EXERCISE]     strength progression, or one exercise's history
     health volume [--weeks N]   weekly tonnage by muscle group
     health sql "SELECT ..."     ask the database directly
@@ -36,6 +37,7 @@ from .analytes import ANALYTES, canonical_analyte
 from .features import (
     cycle as cycle_features,
     labs as lab_features,
+    program as program_features,
     exercise_summary, progression, session_history, stale_lifts, weekly_volume,
 )
 from .config import load_config
@@ -240,11 +242,13 @@ def cmd_checkin(args, config) -> int:
     given = {metric_names.get(f, f): getattr(args, f) for f in fields
             if getattr(args, f) is not None}
 
-    if args.bp or given or args.note:
+    if args.bp or given or args.note or args.weight is not None:
         readings = [[*_parse_bp(b), args.pulse] for b in (args.bp or [])]
         entry = {**given}
         if readings:
             entry["bp_readings"] = readings
+        if args.weight is not None:
+            entry["weight_kg"] = args.weight
         if args.note:
             entry["note"] = args.note
     else:
@@ -430,7 +434,7 @@ def cmd_replay(args, config) -> int:
         print("Nothing in raw/ to replay yet.")
     for report in reports:
         print(report.summary())
-    return 0
+    return 1 if any(report.error for report in reports) else 0
 
 
 def cmd_status(args, config) -> int:
@@ -1015,6 +1019,111 @@ def cmd_lifts(args, config) -> int:
     return 0
 
 
+PROGRAM_FOLDER = "AI Coach"
+
+
+def _print_plan(plan, pushed: str | None = None) -> None:
+    heading = f"{plan.day:%a %d %b} — {plan.kind}"
+    print(heading)
+    print("-" * len(heading))
+
+    if plan.readiness:
+        print(f"readiness: {plan.readiness.replace('_', ' ')}")
+    for adjustment in plan.adjustments:
+        print(f"  {adjustment}")
+    if plan.deload and not plan.is_rest:
+        print("deload week: 85% load, one set fewer, stop well short of failure")
+
+    if plan.is_rest:
+        print("\nno lifting today — recovery is where the session you did gets paid for")
+    elif plan.exercises:
+        print()
+        print(f"{'exercise':<34}{'sets':>5}{'reps':>9}{'load':>10}   why")
+        for item in plan.exercises:
+            low, high = item.reps_range
+            load = f"{item.weight_kg:g} kg" if item.weight_kg else "—"
+            print(f"{item.exercise[:33]:<34}{item.sets:>5}{f'{low}-{high}':>9}{load:>10}   {item.why}")
+
+    if plan.cardio and plan.cardio.kind != "none":
+        print(f"\ncardio  {plan.cardio.title or '—'}: {plan.cardio.note}")
+
+    if plan.steps:
+        print(f"\nsteps   {plan.steps.target:,} — {plan.steps.why}")
+        if plan.steps.recent_average:
+            print(f"        last 7 days averaged {plan.steps.recent_average:,}")
+    if plan.protein:
+        target = f"{plan.protein.target_g} g" if plan.protein.target_g else "—"
+        print(f"protein {target} — {plan.protein.why}")
+
+    if plan.volume:
+        cells = ", ".join(f"{v.muscle} {v.sets:.0f} ({v.verdict})" for v in plan.volume)
+        print(f"\nlast 7 days, hard sets on the priority muscles: {cells}")
+
+    if plan.unmatched:
+        print(f"\nnot in your Hevy catalogue: {', '.join(plan.unmatched)}")
+    if pushed:
+        print(f"\n{pushed} in Hevy as {plan.title!r}")
+
+
+def _push_plan(store: Store, config, plan) -> str:
+    """Create or update the routine for this day type. Returns what happened."""
+    import httpx
+
+    source = build_source("hevy", config)
+    row = store.query(
+        "SELECT routine_id, folder_id FROM program_routines WHERE day_type = ?", [plan.kind])
+    routine_id = row[0][0] if row else None
+    folder_id = row[0][1] if row else None
+
+    if folder_id is None:
+        existing = [f for f in source.routine_folders()
+                    if (f.get("title") or "").strip().lower() == PROGRAM_FOLDER.lower()]
+        folder = existing[0] if existing else source.create_routine_folder(PROGRAM_FOLDER)
+        folder_id = folder.get("id")
+
+    payload = program_features.routine_payload(plan, folder_id)
+    action = "updated"
+    if routine_id:
+        try:
+            source.update_routine(routine_id, payload)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code != 404:
+                raise
+            routine_id = None            # deleted in the app; make a new one
+    if not routine_id:
+        created = source.create_routine(payload)
+        routine_id = created.get("id")
+        action = "created"
+
+    store.db.execute(
+        "INSERT OR REPLACE INTO program_routines VALUES (?, ?, ?, ?, ?)",
+        [plan.kind, str(routine_id), plan.title, folder_id, datetime.now(timezone.utc)])
+    return action
+
+
+def cmd_plan(args, config) -> int:
+    day = date.fromisoformat(args.date) if args.date else date.today()
+
+    if args.week:
+        with _store(config, read_only=True) as store:
+            for plan in program_features.week_plan(store, day):
+                _print_plan(plan)
+                print()
+        return 0
+
+    with _store(config, read_only=not args.push) as store:
+        plan = program_features.plan_session(store, day, auto_regulate=not args.no_regulate)
+        pushed = None
+        if args.push and plan.is_rest:
+            print("Rest day — nothing to push.\n")
+        elif args.push:
+            if plan.unmatched:
+                print("Some slots did not resolve; push anyway with the ones that did.\n")
+            pushed = _push_plan(store, config, plan)
+        _print_plan(plan, pushed)
+    return 0
+
+
 def cmd_volume(args, config) -> int:
     with _store(config, read_only=True) as store:
         rows = weekly_volume(store, weeks=args.weeks)
@@ -1120,6 +1229,8 @@ def build_parser() -> argparse.ArgumentParser:
                              help="a cuff reading, e.g. 128/82 — repeat for "
                                   "more than one")
     checkin_cmd.add_argument("--pulse", type=int)
+    checkin_cmd.add_argument("--weight", type=float, metavar="KG",
+                             help="this morning's bodyweight")
     checkin_cmd.add_argument("--energy", type=int, choices=range(1, 6))
     checkin_cmd.add_argument("--mood", type=int, choices=range(1, 6))
     checkin_cmd.add_argument("--stress", type=int, choices=range(1, 6))
@@ -1203,6 +1314,17 @@ def build_parser() -> argparse.ArgumentParser:
     lifts.add_argument("--limit", type=int, default=20, help="sessions to list")
     lifts.set_defaults(fn=cmd_lifts)
 
+    plan_cmd = sub.add_parser("plan", help="today's session, written from your "
+                                           "own sets — and pushed to Hevy")
+    plan_cmd.add_argument("--date", help="plan a different day (YYYY-MM-DD)")
+    plan_cmd.add_argument("--push", action="store_true",
+                          help="write the routine into Hevy, ready to open")
+    plan_cmd.add_argument("--week", action="store_true",
+                          help="the next seven days, read only")
+    plan_cmd.add_argument("--no-regulate", action="store_true",
+                          help="ignore readiness and plan the session as written")
+    plan_cmd.set_defaults(fn=cmd_plan)
+
     volume = sub.add_parser("volume", help="weekly tonnage by muscle group")
     volume.add_argument("--weeks", type=int, default=8)
     volume.set_defaults(fn=cmd_volume)
@@ -1252,6 +1374,15 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Every command here writes em dashes and ± signs. A Windows console
+    # defaults to cp1252 and turns them into question marks, so ask for UTF-8
+    # rather than write around the punctuation.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass
+
     args = build_parser().parse_args(argv)
     config = load_config(args.root)
     try:

@@ -265,6 +265,17 @@ CREATE TABLE IF NOT EXISTS raw_files (
     parsed_at   TIMESTAMPTZ
 );
 
+-- `health plan --push`'s memory: which Hevy routine holds each day type. The
+-- session is regenerated every morning, so without this you would collect a
+-- new routine a day; with it the same five are updated in place.
+CREATE TABLE IF NOT EXISTS program_routines (
+    day_type    VARCHAR PRIMARY KEY,
+    routine_id  VARCHAR NOT NULL,
+    title       VARCHAR,
+    folder_id   BIGINT,
+    pushed_at   TIMESTAMPTZ NOT NULL
+);
+
 -- `health alert`'s dedup memory: a flag that has already been texted stays
 -- here until it clears, so a condition that takes a week to resolve sends
 -- one message, not one per scheduled check.

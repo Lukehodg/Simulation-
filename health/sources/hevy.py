@@ -167,6 +167,42 @@ class HevySource(Source):
         response.raise_for_status()
         return response.json()
 
+    def _send(self, method: str, path: str, body: dict) -> dict:
+        """The only writes this project makes to any source.
+
+        Nothing calls these during a sync. They exist for `health plan --push`,
+        which writes a routine you asked for into your own Hevy account; a
+        routine is a plan for a future session, so nothing already logged can
+        be overwritten by them.
+        """
+        response = self.client.request(method, path, json=body, headers=self._headers())
+        if response.status_code == 429:
+            time.sleep(float(response.headers.get("Retry-After", 30)))
+            return self._send(method, path, body)
+        response.raise_for_status()
+        return response.json() if response.content else {}
+
+    def routine_folders(self) -> list[dict]:
+        out: list[dict] = []
+        for payload in self.iter_pages("/routine_folders", {"pageSize": PAGE_SIZE}):
+            out.extend(payload.get("routine_folders") or [])
+        return out
+
+    def create_routine_folder(self, title: str) -> dict:
+        payload = self._send("POST", "/routine_folders", {"routine_folder": {"title": title}})
+        return payload.get("routine_folder") or payload
+
+    def create_routine(self, routine: dict) -> dict:
+        payload = self._send("POST", "/routines", {"routine": routine})
+        created = payload.get("routine", payload)
+        # The endpoint has returned both a bare object and a single-item list.
+        return created[0] if isinstance(created, list) and created else created
+
+    def update_routine(self, routine_id: str, routine: dict) -> dict:
+        payload = self._send("PUT", f"/routines/{routine_id}", {"routine": routine})
+        updated = payload.get("routine", payload)
+        return updated[0] if isinstance(updated, list) and updated else updated
+
     def iter_pages(self, path: str, params: dict) -> Iterator[dict]:
         page = 1
         while page <= MAX_PAGES:

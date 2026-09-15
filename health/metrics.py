@@ -99,7 +99,7 @@ SOURCE_PRIORITY: dict[str, list[str]] = {
     STRAIN: ["whoop"],
     STEPS: ["garmin_fit", "garmin_export", "apple_health"],
     ACTIVE_ENERGY: ["garmin_fit", "garmin_export", "apple_health"],
-    BODY_MASS: ["apple_health", "garmin_export", "whoop"],
+    BODY_MASS: ["apple_health", "garmin_export", "whoop", "checkin"],
     ENERGY_INTAKE: ["mfp_csv", "apple_health"],
     PROTEIN: ["mfp_csv", "apple_health"],
     CARBS: ["mfp_csv", "apple_health"],

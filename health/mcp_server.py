@@ -30,6 +30,7 @@ from .features import checkin as checkin_features
 from .features import cycle as cycle_features
 from .features import daily, labs as lab_features
 from .features import experiment as experiment_features
+from .features import program as program_features
 from .features import protocol as protocol_features
 from .features import readiness as readiness_features
 from .features import sleep as sleep_features
@@ -245,6 +246,20 @@ def strength_overview() -> dict[str, Any]:
         "exercises": [{**r, "last_done": str(r["last_done"])} for r in rows],
         "stale": [{**r, "last_done": str(r["last_done"])} for r in stale],
     }
+
+
+@server.tool(description="The planned session for a day: which lifts, at what "
+                         "load and reps, with the progression reason for each, "
+                         "plus the cardio block and the day's step target. "
+                         "Loads come from logged sets and are auto-regulated by "
+                         "readiness. Read only — pushing it to Hevy is "
+                         "`health plan --push`, which the person runs.")
+@guarded
+def training_plan(day: str | None = None, week: bool = False) -> dict[str, Any]:
+    with _store() as store:
+        if week:
+            return {"days": [p.as_dict() for p in program_features.week_plan(store, _day(day))]}
+        return program_features.plan_session(store, _day(day)).as_dict()
 
 
 @server.tool(description="Weekly training tonnage by muscle group.")

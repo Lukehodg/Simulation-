@@ -42,11 +42,12 @@ Built and tested:
 | **Alerts** | Illness watch, a BP escalation, or a compound marker trending — texted once when it appears, silent while it stays true, `health alert --notify` |
 | **Energy availability** | Screening figure (kcal/kg fat-free mass/day) and a RED-S watch — built and tested now, dormant until nutrition/body-comp data connects |
 | **Brief** | `health brief` — the day (or the week) read back to you in two paragraphs, on a schedule if you want it |
-| **Agent tools** | 37 MCP tools — the surface Claude actually talks to |
+| **Agent tools** | 38 MCP tools — the surface Claude actually talks to |
 | **Interface** | A local page on 127.0.0.1, served from the same database — readiness, protocol, six-week drift, sleep architecture, check-in, experiment verdicts, load-ratio and sleep-debt charts, this week's research |
 | **Bloods page** | Drop a report in, see what is flagged, ask Claude to read it |
 | **Indicators** | Per-domain status with the evidence behind each — deliberately no single score |
 | **Training observations** | Stalled, dormant, progressing and imbalanced, computed from your sets |
+| **Next session** | `health plan` — double progression from your logged sets, auto-regulated by readiness, with the cardio block and step target; `--push` writes it into Hevy |
 
 Next: the Garmin export and `.FIT` parsers, and connecting MyFitnessPal or
 Apple Health nutrition (which is what energy availability above is waiting on).
@@ -132,6 +133,22 @@ tokens refresh themselves and you should not need to do this again.
 
 ### Apple Health (this is also how Garmin and MyFitnessPal arrive)
 
+**Backfill first, from the native export.** Settings → Health → your profile →
+*Export All Health Data* produces an `export.zip` (hundreds of MB; years of
+weight, steps, macros, sleep and heart rate). Drop it anywhere and:
+
+```sh
+health ingest ~/Downloads/export.zip --source apple_health
+```
+
+It is streamed, not loaded, so it takes a few minutes and little memory, and
+lands as one JSON of daily values rather than the XML — the phone can always
+regenerate the samples. Two devices that both counted the same steps are
+reduced to the larger one for the day, which is what Apple itself shows; a
+night described by both a watch and a phone keeps the version with sleep
+stages. Then set up the daily JSON below for everything that comes after.
+
+
 Garmin has no personal API — its developer programme requires a legal entity,
 and the library every unofficial client depended on was deprecated in March
 2026. So Garmin Connect writes into Apple Health instead, alongside your
@@ -171,6 +188,87 @@ above 12 reps count toward volume but are excluded from strength estimates —
 Epley is fitted to low-rep work and flatters endurance sets into fake PRs.
 Exercises with no Hevy template appear as `unmapped` in the volume table rather
 than disappearing from it.
+
+## The next session
+
+The one place this project writes rather than reads. `health plan` takes the
+sets you logged, works out what today should be, and pushes the routine back
+into Hevy so it is waiting when you open the app.
+
+```sh
+health plan                           # today's session, printed
+health plan --push                    # ...and written into Hevy, ready to open
+health plan --week                    # the next seven days, read only
+health plan --date 2026-09-20 --push  # plan a specific day
+```
+
+```
+Mon 14 Sep — push
+-----------------
+readiness: proceed
+
+exercise                           sets     reps      load   why
+Bench Press (Barbell)                 4      6-9   82.5 kg   hit 9 on every set at 80 kg — load goes up 2.5 kg
+Incline Bench Press (Dumbbell)        3     8-12     30 kg   hold 30 kg, chase 10 reps on every set
+Shoulder Press (Dumbbell)             3     8-12     22 kg   hold 22 kg, chase 9 reps on every set
+...
+
+cardio  Cycling (Indoor): 5 min easy, then 8 x 30s hard / 90s easy, 5 min down
+steps   13,000 — losing 0.19 kg/wk, under the 0.43 kg floor for 85.3 kg — steps up
+        last 7 days averaged 9,800
+```
+
+The split runs Push / Pull / Legs / Rest / Upper / Lower as a **chest and arms
+specialisation block**: those muscles get 16–20 hard sets a week over three
+exposures and go first in their sessions; legs, back and shoulders sit at
+maintenance so a deficit's recovery budget is spent where the growth is wanted.
+Each plan reports the last seven days' hard sets on the priority muscles against
+those targets, so a week that quietly under-delivered is visible.
+
+Loads come from **double progression** — hold the weight until every working
+set reaches the top of the rep range, then add one increment and reset to the
+bottom. Progression is judged on the *top* set of the last session, so an
+ascending ramp logged as working sets (20, 40, 50, 60 kg) reads as 60 kg, not
+the average. A top set well under the range gets an Epley estimate of the right
+load rather than a token 2.5 kg drop; loads under 20 kg move in 1.25 kg steps.
+No 1RM test, no RPE guesswork, and the reason for each number travels with it
+into the routine's notes.
+
+Exercises you have actually logged win over the textbook name in the same slot
+— your rope pushdown beats a generic pushdown — and nothing is used twice in
+one session.
+
+Three things it does that a programme on paper cannot:
+
+  * **It reads `readiness` first.** A `hold` call stops loads advancing; a
+    `pull_back` drops the last isolation lift, takes a set off everything else,
+    trims the load by a tenth and swaps the intervals for easy zone 2 — before
+    you get to the gym rather than after a session that went badly. `--no-regulate`
+    plans the session as written.
+  * **Cardio is placed after lifting**, because doing it first measurably blunts
+    strength output, and it is zone 2 — 30 minutes conversational, an incline
+    walk counts. Intervals are wired in (`HIIT_DAY`) but off by default: they
+    cost recovery a deficit and a sleep debt do not leave spare, and the steps
+    already do the fat-loss work. Name a day once intake is at target.
+  * **Steps are prescribed against the scale, at recomposition pace.** Losing
+    slower than 0.3% of bodyweight a week adds a thousand; faster than 0.7%
+    takes one away — slower than a straight cut on purpose, because muscle is
+    not built in a steep deficit. With no bodyweight logged it says so instead
+    of adapting to nothing. A protein target (2 g/kg) rides alongside, checked
+    against yesterday's logged intake when nutrition data is connected.
+
+Every sixth week — counted from your first logged workout, not the calendar —
+deloads on its own: 85% load, one set fewer, cardio halved.
+
+Exercises are matched against *your* Hevy catalogue, custom ones included, with
+candidates tried in order — a missing machine falls through to the next choice
+rather than dropping the muscle from the session. Anything that cannot be
+matched is named rather than silently skipped.
+
+`--push` keeps one routine per day type in an **AI Coach** folder and updates it
+in place, so you end up with five routines rather than a new one every morning.
+It is the only write this project makes to any source, and it only touches
+routines — a plan for a future session, never anything already logged.
 
 ## Cycle
 
@@ -497,7 +595,18 @@ set, since an alert job that can never text you is pointless.
 
 Two syncs cannot run at once: DuckDB gives the file to a single writer, so a
 scheduled run that collides with a manual one now stops with a sentence rather
-than a lock error that looks like a bug.
+than a lock error that looks like a bug. The lock is `flock` on POSIX and
+`msvcrt.locking` on Windows; the rest of the CLI runs on both.
+
+**On Windows**, `schedule --install` prints the cron line rather than writing a
+launchd agent, so pick a scheduler yourself. Either Task Scheduler pointed at
+`.venv\Scripts\health.exe sync`, or — if you already talk to this project
+through Claude — a Claude scheduled task running the morning sequence:
+
+```
+.venv\Scripts\health.exe sync
+.venv\Scripts\health.exe plan --push
+```
 
 **Backups archive `raw/`, not the database.** The database is disposable —
 `health replay` rebuilds every table from raw payloads. What cannot be rebuilt
@@ -680,15 +789,16 @@ the agent:
 claude mcp add health -- /path/to/.venv/bin/health mcp --root /path/to/project
 ```
 
-That exposes 37 tools — baselines, deviations, correlations, training load,
+That exposes 38 tools — baselines, deviations, correlations, training load,
 lift progression, cycle phase, blood results, literature search, the readiness
 call and its cross-domain siblings, what's currently flagged, energy
-availability, and a daily brief that pulls them together. Then you can just
-ask:
+availability, today's planned session, and a daily brief that pulls them
+together. Then you can just ask:
 
 > *why has my sleep been bad since August?*
 > *am I actually getting stronger on RDLs, or just adding reps?*
 > *what does the literature say about my GGT?*
+> *what am I lifting today, and why that weight?*
 
 The design rule is that **the model never queries the database freely, never
 receives a raw dump, and never does arithmetic**. Python computes; the model
@@ -742,6 +852,27 @@ year of history that an API may no longer be willing to give you.
 upsert, so syncing twice, replaying, and re-fetching an overlap window all
 converge on the same database. Syncs deliberately re-fetch a few days: WHOOP
 re-scores a night hours later, and Hevy workouts get edited after the session.
+
+Payload loading is transactional: an interrupted write rolls back its inserts
+and deletions together. An edited Hevy workout with no remaining sets clears
+its previous sets locally. Sync parse failures are reported against the source
+and do not advance its cursor.
+
+`health replay` replaces canonical records in a single transaction, ordered by
+the arrival timestamps in raw filenames across all payload kinds. Source-only
+replay replaces that source's records. A corrupt payload or failed rebuild
+rolls back the whole replay and returns a nonzero exit status; an empty archive
+leaves the database alone. Sync cursors, alert memory and Hevy routine IDs are
+preserved. Replay rebuilds data in the existing schema; it is not a schema
+migration command.
+
+Readiness reports `insufficient_data` when there is no usable current recovery
+signal, no sleep today, fewer than seven recorded nights in the last fourteen,
+or no usable training-load history. Observed adverse signals can still produce
+`hold` or `pull_back`. Otherwise the planner repeats loads until enough data
+arrives; `--no-regulate` explicitly opts out. Calculation errors are surfaced
+instead of silently disabling regulation. Historical plans use workout history
+only up to their requested date.
 
 One thing is deliberately *not* unified. WHOOP reports HRV as RMSSD during
 slow-wave sleep; Apple reports SDNN. They are different numbers measuring
