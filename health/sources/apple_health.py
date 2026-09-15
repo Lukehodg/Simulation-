@@ -1,4 +1,4 @@
-"""Apple Health, via Health Auto Export.
+"""Apple Health, via Health Auto Export or the native export.
 
 This is the bridge that makes the whole thing work on an iPhone without a
 single unofficial API: Garmin Connect writes its dailies into Apple Health,
@@ -69,6 +69,60 @@ NUTRITION_COLUMNS = {
 
 FLOW_WORDS = {0: "none", 1: "light", 2: "medium", 3: "heavy", 4: "unspecified"}
 
+# -- the native export ------------------------------------------------------
+#
+# Settings > Health > Export All Health Data gives a zip with one export.xml
+# holding every sample the phone has ever stored: 700 MB is normal. It is the
+# fast way to backfill years of weight, steps and macros before the daily
+# JSON takes over. Sample types map onto the same names Health Auto Export
+# uses, so one parse path serves both.
+
+HK_TYPES: dict[str, str] = {
+    "HKQuantityTypeIdentifierHeartRate": "heart_rate",
+    "HKQuantityTypeIdentifierRestingHeartRate": "resting_heart_rate",
+    "HKQuantityTypeIdentifierHeartRateVariabilitySDNN": "heart_rate_variability",
+    "HKQuantityTypeIdentifierRespiratoryRate": "respiratory_rate",
+    "HKQuantityTypeIdentifierOxygenSaturation": "blood_oxygen_saturation",
+    "HKQuantityTypeIdentifierVO2Max": "vo2_max",
+    "HKQuantityTypeIdentifierAppleSleepingWristTemperature": "apple_sleeping_wrist_temperature",
+    "HKQuantityTypeIdentifierStepCount": "step_count",
+    "HKQuantityTypeIdentifierActiveEnergyBurned": "active_energy",
+    "HKQuantityTypeIdentifierBasalEnergyBurned": "basal_energy_burned",
+    "HKQuantityTypeIdentifierAppleExerciseTime": "apple_exercise_time",
+    "HKQuantityTypeIdentifierBodyMass": "weight_body_mass",
+    "HKQuantityTypeIdentifierBodyFatPercentage": "body_fat_percentage",
+    "HKQuantityTypeIdentifierLeanBodyMass": "lean_body_mass",
+    "HKQuantityTypeIdentifierDietaryEnergyConsumed": "dietary_energy",
+    "HKQuantityTypeIdentifierDietaryProtein": "protein",
+    "HKQuantityTypeIdentifierDietaryCarbohydrates": "carbohydrates",
+    "HKQuantityTypeIdentifierDietaryFatTotal": "total_fat",
+    "HKQuantityTypeIdentifierDietaryFiber": "fiber",
+    "HKQuantityTypeIdentifierDietarySodium": "sodium",
+    "HKQuantityTypeIdentifierDietaryCaffeine": "dietary_caffeine",
+    "HKQuantityTypeIdentifierDietaryWater": "dietary_water",
+    "HKQuantityTypeIdentifierDietarySugar": "dietary_sugar",
+}
+HK_SLEEP = "HKCategoryTypeIdentifierSleepAnalysis"
+HK_FLOW = "HKCategoryTypeIdentifierMenstrualFlow"
+HK_FLOW_WORDS = {"HKCategoryValueMenstrualFlowLight": "light",
+                 "HKCategoryValueMenstrualFlowMedium": "medium",
+                 "HKCategoryValueMenstrualFlowHeavy": "heavy",
+                 "HKCategoryValueMenstrualFlowUnspecified": "unspecified",
+                 "HKCategoryValueMenstrualFlowNone": "none"}
+HK_SLEEP_STAGES = {"HKCategoryValueSleepAnalysisAsleepCore": "core",
+                   "HKCategoryValueSleepAnalysisAsleepDeep": "deep",
+                   "HKCategoryValueSleepAnalysisAsleepREM": "rem",
+                   "HKCategoryValueSleepAnalysisAwake": "awake",
+                   "HKCategoryValueSleepAnalysisInBed": "inBed",
+                   "HKCategoryValueSleepAnalysisAsleepUnspecified": "asleep"}
+#: Everything lands in the units the JSON path expects.
+HK_UNIT_FACTORS = {"lb": 0.45359237, "Cal": 1.0, "kJ": 0.239006, "oz": 28.3495,
+                   "fl_oz_us": 29.5735, "L": 1000.0}
+#: Two devices both count your steps; Apple de-duplicates in the app but the
+#: export carries both. Per day, the biggest single source is the honest one.
+HK_PICK_LARGEST_SOURCE = {"step_count", "active_energy", "basal_energy_burned",
+                          "apple_exercise_time"}
+
 
 def _quantity(entry: dict) -> float | None:
     """HAE emits `qty` for simple metrics and Min/Avg/Max for sampled ones."""
@@ -113,6 +167,164 @@ class AppleHealthSource(Source):
             return False, f"{directory} does not exist"
         files = list(directory.glob("*.json"))
         return bool(files), f"{len(files)} export file(s) in {directory}"
+
+    # -- the native export ---------------------------------------------------
+
+    def add(self, path: Path, **_: object) -> Path:
+        """Land a native export (`export.zip` or `export.xml`) as one JSON file
+        of daily values, in the same shape the daily JSON arrives in.
+
+        The XML is not kept: at 700 MB it would dwarf everything else in
+        raw/ and the phone can always regenerate it. What lands is one row
+        per metric per day — the same reduction `parse` applies to the daily
+        files, just done while streaming so the whole file never sits in
+        memory. Keep the zip yourself if you want the samples back.
+        """
+        if path.suffix.lower() == ".zip":
+            import zipfile
+            with zipfile.ZipFile(path) as archive:
+                member = next((n for n in archive.namelist() if n.endswith("export.xml")),
+                              None)
+                if member is None:
+                    raise ValueError(f"{path.name} has no export.xml inside it")
+                with archive.open(member) as handle:
+                    payload = self._reduce_xml(handle)
+        elif path.suffix.lower() == ".xml":
+            with path.open("rb") as handle:
+                payload = self._reduce_xml(handle)
+        else:
+            return rawstore.copy_in(self.config.raw_dir, self.name, "export", path)
+        payload["format"] = "apple_native_export"
+        payload["file"] = path.name
+        return rawstore.write(self.config.raw_dir, self.name, "export", payload)
+
+    def _reduce_xml(self, handle) -> dict:
+        import xml.etree.ElementTree as ET
+
+        # (metric, day, source) -> running sum / count / last, so a day's value
+        # can be picked per source afterwards without holding the samples.
+        sums: dict[tuple[str, date, str], float] = defaultdict(float)
+        counts: dict[tuple[str, date, str], int] = defaultdict(int)
+        last: dict[tuple[str, date], tuple[datetime, float]] = {}
+        stamps: dict[tuple[str, date], datetime] = {}
+        sleep: dict[tuple[date, str], dict] = {}
+        flows: list[dict] = []
+
+        root = None
+        seen = 0
+        for event, elem in ET.iterparse(handle, events=("start", "end")):
+            if event == "start":
+                if root is None:
+                    root = elem
+                continue
+            if elem.tag != "Record":
+                continue
+            kind = elem.get("type", "")
+            try:
+                if kind in HK_TYPES:
+                    self._reduce_quantity(elem, HK_TYPES[kind], sums, counts, last, stamps)
+                elif kind == HK_SLEEP:
+                    self._reduce_sleep(elem, sleep)
+                elif kind == HK_FLOW:
+                    self._reduce_flow(elem, flows)
+            finally:
+                # Cleared elements still hang off the root as empty children;
+                # a million of them is a gigabyte. Drop them as we go.
+                elem.clear()
+                seen += 1
+                if root is not None and seen % 50_000 == 0:
+                    root.clear()
+                    self.report_progress("samples", seen)
+
+        metrics: dict[str, list[dict]] = defaultdict(list)
+        by_day: dict[tuple[str, date], dict[str, float]] = defaultdict(dict)
+        for (name, day, source), total in sums.items():
+            by_day[(name, day)][source] = total
+        for (name, day), per_source in sorted(by_day.items()):
+            rule = METRIC_MAP[name][1]
+            if rule == LAST:
+                value = last[(name, day)][1]
+            elif name in HK_PICK_LARGEST_SOURCE:
+                value = max(per_source.values())
+            elif rule == SUM:
+                value = sum(per_source.values())
+            else:
+                n = sum(counts[(name, day, s)] for s in per_source)
+                value = sum(per_source.values()) / n
+            metrics[name].append({"date": stamps[(name, day)].strftime("%Y-%m-%d %H:%M:%S %z"),
+                                  "qty": round(value, 4)})
+
+        sleep_entries = []
+        for (day, source), night in sorted(sleep.items()):
+            entry = {"sleepStart": night["start"].strftime("%Y-%m-%d %H:%M:%S %z"),
+                     "sleepEnd": night["end"].strftime("%Y-%m-%d %H:%M:%S %z"),
+                     "source": source}
+            for stage, minutes in night["stages"].items():
+                entry[stage] = round(minutes / 60, 3)
+            stages = night["stages"]
+            if "asleep" in stages and not any(k in stages for k in ("core", "deep", "rem")):
+                entry["asleep"] = round(stages["asleep"] / 60, 3)
+            sleep_entries.append(entry)
+        # A watch and a phone both describe the same night; keep the one with
+        # more detail (stages) or, failing that, the longer one.
+        best_nights: dict[str, dict] = {}
+        for entry in sleep_entries:
+            key = entry["sleepEnd"][:10]
+            score = (sum(k in entry for k in ("core", "deep", "rem")),
+                     entry.get("asleep", 0) + entry.get("inBed", 0))
+            if key not in best_nights or score > best_nights[key][0]:
+                best_nights[key] = (score, entry)
+        if best_nights:
+            metrics["sleep_analysis"] = [e for _s, e in best_nights.values()]
+        if flows:
+            metrics["menstrual_flow"] = flows
+
+        return {"data": {"metrics": [{"name": name, "data": entries}
+                                     for name, entries in metrics.items()]}}
+
+    def _reduce_quantity(self, elem, name, sums, counts, last, stamps) -> None:
+        raw = elem.get("value")
+        end = parse_ts(elem.get("endDate") or elem.get("startDate"))
+        if raw is None or end is None:
+            return
+        try:
+            value = float(raw)
+        except ValueError:
+            return
+        value *= HK_UNIT_FACTORS.get(elem.get("unit", ""), 1.0)
+        day = local_date(end, self.config.timezone)
+        source = elem.get("sourceName") or "unknown"
+        key = (name, day, source)
+        sums[key] += value
+        counts[key] += 1
+        if (name, day) not in last or end >= last[(name, day)][0]:
+            last[(name, day)] = (end, value)
+        stamps[(name, day)] = max(stamps.get((name, day), end), end)
+
+    def _reduce_sleep(self, elem, sleep) -> None:
+        stage = HK_SLEEP_STAGES.get(elem.get("value", ""))
+        start = parse_ts(elem.get("startDate"))
+        end = parse_ts(elem.get("endDate"))
+        if not (stage and start and end):
+            return
+        day = sleep_local_date(end, self.config.timezone)
+        source = elem.get("sourceName") or "unknown"
+        night = sleep.setdefault((day, source), {"start": start, "end": end, "stages": {}})
+        night["start"] = min(night["start"], start)
+        night["end"] = max(night["end"], end)
+        minutes = (end - start).total_seconds() / 60
+        night["stages"][stage] = night["stages"].get(stage, 0.0) + minutes
+
+    def _reduce_flow(self, elem, flows) -> None:
+        start = parse_ts(elem.get("startDate"))
+        flow = HK_FLOW_WORDS.get(elem.get("value", ""))
+        if not (start and flow):
+            return
+        entry = {"date": start.strftime("%Y-%m-%d %H:%M:%S %z"), "value": flow}
+        for meta in elem.iter("MetadataEntry"):
+            if meta.get("key") == "HKMenstrualCycleStart" and meta.get("value") == "1":
+                entry["cycle_start"] = True
+        flows.append(entry)
 
     # -- parse -------------------------------------------------------------
 
