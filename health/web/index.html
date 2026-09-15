@@ -193,14 +193,14 @@ function illnessAlert(watch) {
 function readinessSection(readiness) {
   if (!readiness || !readiness.recommendation) return null;
   const box = el("section");
-  const cls = { push: "good", proceed: "ink", hold: "warn", pull_back: "bad" }
+  const cls = { push: "good", proceed: "ink", hold: "warn", pull_back: "bad", insufficient_data: "warn" }
     [readiness.recommendation] || "ink";
   const head = el("div", "head");
   head.appendChild(el("h3", null, "Readiness"));
   head.appendChild(el("div", `call ${cls}`, readiness.recommendation.replace("_", " ")));
   box.appendChild(head);
   box.appendChild(el("p", "caption", readiness.advice || ""));
-  const reasons = (readiness.reasons || []).concat(readiness.context || []);
+  const reasons = (readiness.reasons || []).concat(readiness.context || [], readiness.caveats || []);
   reasons.forEach(r => box.appendChild(el("p", "caption", "— " + r)));
   return box;
 }

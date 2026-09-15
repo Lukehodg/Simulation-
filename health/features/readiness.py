@@ -184,8 +184,10 @@ def sleep_debt_series(store: Store, start: date, end: date
 # --------------------------------------------------------------------------
 
 PUSH, PROCEED, HOLD, PULL_BACK = "push", "proceed", "hold", "pull_back"
+INSUFFICIENT_DATA = "insufficient_data"
 
 _ADVICE = {
+    INSUFFICIENT_DATA: "not enough current data to assess readiness; automatic load progression is paused",
     PUSH: "green light — a hard session or a PR attempt is well supported today",
     PROCEED: "train as planned; nothing in the data argues against it",
     HOLD: "keep it moderate — hold volume and intensity where they are rather "
@@ -326,11 +328,21 @@ def readiness(store: Store, day: date | None = None) -> Readiness:
     # logged yet, or a real rest week) into "steady" — only a missing ratio
     # should fall back to neutral.
     ratio = load.ratio if load.ratio is not None else 1.0
+    sleep_today = store.query(
+        "SELECT 1 FROM daily_metrics WHERE metric = ? AND local_date = ?",
+        [M.SLEEP_DURATION, day])
+    sufficient = bool(signals) and debt.nights >= 7 and bool(sleep_today) and load.ratio is not None
+    if not sufficient:
+        caveats.append("readiness needs a current recovery signal with a baseline, "
+                       "sleep today and at least seven nights in the last fourteen, "
+                       "and a usable training-load history")
     if (adverse_signals >= 2 or ratio > 1.5
             or (adverse_signals >= 1 and debt.debt_hours > 3)):
         rec = PULL_BACK
     elif adverse_signals >= 1 or ratio > 1.3 or debt.debt_hours > 4:
         rec = HOLD
+    elif not sufficient:
+        rec = INSUFFICIENT_DATA
     elif (len(adverse_mags) == len(_RECOVERY_SIGNALS)
           and all(m < CLEAN_Z for m in adverse_mags)
           and 0.8 <= ratio <= 1.3 and debt.debt_hours < 1):

@@ -59,9 +59,91 @@ def test_replay_survives_a_corrupt_payload(config, land):
     with Store(":memory:") as store:
         store.init_schema()
         reports = replay(store, config)
-        # The good payload still loads; the bad one is reported, not fatal.
-        assert store.counts()["observations"] > 0
+        # A corrupt archive cannot replace the database with a partial rebuild.
+        assert store.counts()["observations"] == 0
     assert "JSONDecodeError" in (reports[0].error or "")
+
+
+def test_replay_removes_obsolete_rows_and_preserves_other_sources(config, land):
+    from health.models import Observation
+    land("whoop", "recovery", "whoop_recovery.json")
+    with Store(":memory:") as store:
+        store.init_schema()
+        now = datetime.now(timezone.utc)
+        store.load(Records(observations=[Observation(
+            ts=now, local_date=now.date(), source=source, source_id="obsolete",
+            metric="steps", value=123) for source in ("whoop", "apple_health")]))
+        replay(store, config, "whoop")
+        assert store.query("SELECT source FROM observations WHERE source_id = 'obsolete'") == [("apple_health",)]
+
+
+def test_replay_failure_preserves_existing_data(config, land):
+    land("whoop", "recovery", "whoop_recovery.json")
+    with Store(":memory:") as store:
+        store.init_schema()
+        replay(store, config)
+        before = store.query("SELECT * FROM observations ORDER BY source_id")
+        broken = config.raw_dir / "whoop" / "recovery" / "2026-10" / "20261001T000000000.json"
+        broken.parent.mkdir(parents=True)
+        broken.write_text("{broken")
+        reports = replay(store, config)
+        assert reports[0].error
+        assert store.query("SELECT * FROM observations ORDER BY source_id") == before
+
+
+def test_replay_applies_deletions_after_older_workout_payload(config, land):
+    from health import raw
+    path = land("hevy", "workouts", "hevy_workouts.json")
+    payload = raw.RawFile(path, "hevy", "workouts", datetime.now(timezone.utc)).load()
+    workout_id = payload["workouts"][0]["id"]
+    raw.write(config.raw_dir, "hevy", "events",
+              {"events": [{"type": "deleted", "id": workout_id}]},
+              fetched_at=datetime.now(timezone.utc) + timedelta(days=1))
+    with Store(":memory:") as store:
+        store.init_schema()
+        assert not any(r.error for r in replay(store, config))
+        assert store.query("SELECT COUNT(*) FROM workouts") == [(0,)]
+
+
+def test_parse_failure_is_reported_without_advancing_cursor(config, monkeypatch):
+    class BrokenParser:
+        pollable = True
+        def fetch(self, since=None):
+            return [Path("broken.json")]
+        def parse(self, path):
+            raise ValueError("invalid payload")
+    monkeypatch.setattr("health.sync.build_source", lambda *args: BrokenParser())
+    with Store(":memory:") as store:
+        store.init_schema()
+        cursor = "2026-09-01T00:00:00Z"
+        store.set_cursor("whoop", cursor)
+        result = sync_source(store, config, "whoop")
+        assert "invalid payload" in result.error
+        assert store.get_cursor("whoop") == cursor
+
+
+def test_raw_order_uses_arrival_stamp_and_numeric_collision_suffix(config):
+    from health import raw
+    moment = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    for i in range(12):
+        raw.write(config.raw_dir, "hevy", "events", {"sequence": i}, fetched_at=moment)
+    files = list(raw.iter_raw(config.raw_dir))
+    assert [f.load()["sequence"] for f in files] == list(range(12))
+    assert all(f.fetched_at == moment for f in files)
+
+
+def test_empty_replay_preserves_data_and_operational_state(config, land):
+    land("whoop", "recovery", "whoop_recovery.json")
+    with Store(":memory:") as store:
+        store.init_schema()
+        store.set_cursor("whoop", "2026-09-01T00:00:00Z")
+        store.mark_alerted("watch")
+        replay(store, config)
+        before = store.counts()
+        assert replay(store, config, "hevy") == []
+        assert store.counts() == before
+        assert store.get_cursor("whoop") == "2026-09-01T00:00:00Z"
+        assert store.alerted("watch")
 
 
 def test_incremental_sync_refetches_an_overlap(config, monkeypatch):

@@ -140,6 +140,19 @@ def test_a_missing_signal_becomes_a_caveat_not_a_guess(store):
     assert any("HRV" in c for c in result.caveats)
 
 
+def test_empty_data_has_no_green_light(store):
+    result = readiness.readiness(store, START)
+    assert result.recommendation == readiness.INSUFFICIENT_DATA
+    assert "not enough" in result.as_dict()["advice"]
+
+
+def test_missing_sleep_cannot_earn_push(store):
+    _clean_day(store)
+    store.db.execute("DELETE FROM observations WHERE metric = 'sleep_duration'")
+    result = readiness.readiness(store, START + timedelta(days=39))
+    assert result.recommendation == readiness.INSUFFICIENT_DATA
+
+
 # -- recovery drivers -------------------------------------------------
 
 def test_recovery_drivers_returns_only_intervals_that_clear_zero(store):

@@ -19,7 +19,8 @@ from typing import Any
 
 from .brief import Brief
 
-_REC_CLASS = {"push": "good", "proceed": "ink", "hold": "warn", "pull_back": "bad"}
+_REC_CLASS = {"push": "good", "proceed": "ink", "hold": "warn", "pull_back": "bad",
+              "insufficient_data": "warn"}
 
 _CSS = """
 :root{--ink:#101418;--paper:#F7F8F7;--panel:#FFF;--soft:#5A6470;--rule:#D8DDDA;

@@ -7,6 +7,7 @@ converges on the same database instead of duplicating it.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Sequence
@@ -114,6 +115,8 @@ class Store:
         if str(path) != ":memory:":
             self.path.parent.mkdir(parents=True, exist_ok=True)
         self.db = duckdb.connect(str(path), read_only=read_only)
+        self._transaction_depth = 0
+        self._transaction_failed = False
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -153,6 +156,28 @@ class Store:
 
     # -- writing -----------------------------------------------------------
 
+    @contextmanager
+    def transaction(self):
+        """Join an existing transaction, or commit/roll back a complete operation."""
+        outer = self._transaction_depth == 0
+        if outer:
+            self.db.execute("BEGIN TRANSACTION")
+            self._transaction_failed = False
+        self._transaction_depth += 1
+        try:
+            yield
+            if outer:
+                if self._transaction_failed:
+                    raise RuntimeError("transaction rolled back after an inner operation failed")
+                self.db.execute("COMMIT")
+        except BaseException:
+            self._transaction_failed = True
+            if outer:
+                self.db.execute("ROLLBACK")
+            raise
+        finally:
+            self._transaction_depth -= 1
+
     def upsert(self, table: str, rows: Sequence[dict[str, Any]]) -> int:
         if not rows:
             return 0
@@ -171,6 +196,10 @@ class Store:
 
     def load(self, records: Records) -> dict[str, int]:
         """Write a parsed bundle. Returns rows written per table."""
+        with self.transaction():
+            return self._load(records)
+
+    def _load(self, records: Records) -> dict[str, int]:
         now = datetime.now(timezone.utc)
         written: dict[str, int] = {}
         if records.deleted_workouts:
@@ -178,7 +207,7 @@ class Store:
         # A workout payload always carries the complete exercise list, so a set
         # that is absent from it was removed in the app. Upsert alone would
         # leave it behind forever, quietly inflating training volume.
-        self._clear_sets_for(records.strength_sets)
+        self._clear_sets_for(records)
         for field, table in _RECORD_TABLES.items():
             items = getattr(records, field)
             if not items:
@@ -191,8 +220,11 @@ class Store:
             written[table] = self.upsert(table, rows)
         return written
 
-    def _clear_sets_for(self, sets: Sequence[Any]) -> None:
-        pairs = {(item.source, item.workout_id) for item in sets}
+    def _clear_sets_for(self, records: Records) -> None:
+        pairs = {(item.source, item.workout_id) for item in records.strength_sets}
+        # Complete Hevy workouts can now contain no sets at all.
+        pairs.update((w.source, w.source_id) for w in records.workouts
+                     if w.source == "hevy")
         for source, workout_id in pairs:
             self.db.execute(
                 "DELETE FROM strength_sets WHERE source = ? AND workout_id = ?",

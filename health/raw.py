@@ -9,6 +9,7 @@ the API may no longer be willing to hand over.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -63,7 +64,8 @@ def iter_raw(raw_dir: Path, source: str | None = None,
     root = raw_dir / source if source else raw_dir
     if not root.exists():
         return
-    for path in sorted(root.rglob("*")):
+    files = []
+    for path in root.rglob("*"):
         if not path.is_file() or path.name.startswith("."):
             continue
         rel = path.relative_to(raw_dir).parts
@@ -72,9 +74,17 @@ def iter_raw(raw_dir: Path, source: str | None = None,
         file_source, file_kind = rel[0], rel[1]
         if kind and file_kind != kind:
             continue
-        yield RawFile(
+        stamp = re.match(r"^(\d{8}T\d{9})(?:-(\d+))?(?:\.|-)", path.name)
+        fetched_at = (datetime.strptime(stamp[1], "%Y%m%dT%H%M%S%f")
+                      .replace(tzinfo=timezone.utc) if stamp else
+                      datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc))
+        item = RawFile(
             path=path,
             source=file_source,
             kind=file_kind,
-            fetched_at=datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc),
+            fetched_at=fetched_at,
         )
+        files.append((fetched_at, int(stamp[2] or 0) if stamp else 0,
+                      str(path), item))
+    for _, _, _, item in sorted(files, key=lambda entry: entry[:3]):
+        yield item

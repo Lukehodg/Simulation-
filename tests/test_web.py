@@ -317,7 +317,7 @@ def test_today_payload_carries_the_full_cross_domain_picture(db, config):
 
     payload = today_payload(db, config, day=TODAY)
 
-    assert payload["readiness"]["recommendation"] in ("push", "proceed", "hold", "pull_back")
+    assert payload["readiness"]["recommendation"] in ("push", "proceed", "hold", "pull_back", "insufficient_data")
     assert "no_score" in payload["readiness"]
     assert payload["protocol"]["on"] == []          # nothing logged in this fixture
     assert payload["illness_watch"]["flag"] in ("watch", "clear")

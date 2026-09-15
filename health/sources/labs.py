@@ -178,12 +178,15 @@ class LabsSource(Source):
     def read_panel(self, path: Path, date: str | None = None,
                    lab: str | None = None) -> dict:
         """Normalise either input format into the JSON shape we land."""
+        # Explicit UTF-8: on Windows the locale default is cp1252, which turns
+        # a lab's "µg/L" into "Âµg/L", the unit goes unrecognised, and the flag
+        # is silently withheld.
         if path.suffix.lower() == ".csv":
-            with path.open(newline="") as handle:
+            with path.open(newline="", encoding="utf-8") as handle:
                 rows = [dict(row) for row in csv.DictReader(handle)]
             payload = {"results": rows}
         else:
-            payload = json.loads(path.read_text())
+            payload = json.loads(path.read_text(encoding="utf-8"))
             if isinstance(payload, list):
                 payload = {"results": payload}
 

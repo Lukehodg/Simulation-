@@ -184,7 +184,7 @@ def test_cycle_sensitive_analytes_are_not_trended_across_phases(labs, config, st
 
 # -- PDF reports ------------------------------------------------------------
 
-REPORT_TEXT = (FIXTURES / "report_text.txt").read_text()
+REPORT_TEXT = (FIXTURES / "report_text.txt").read_text(encoding="utf-8")
 
 
 @pytest.fixture

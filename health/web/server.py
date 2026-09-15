@@ -147,9 +147,10 @@ class Handler(BaseHTTPRequestHandler):
                 landed = source.add(incoming)
                 records = source.parse(landed)
                 with self._store(write=True) as store:
-                    written = store.load(records)
-                    store.record_raw(landed, "labs", "panel",
-                                     datetime.now(timezone.utc), parsed=True)
+                    with store.transaction():
+                        written = store.load(records)
+                        store.record_raw(landed, "labs", "panel",
+                                         datetime.now(timezone.utc), parsed=True)
                 unknown = source.unknown_analytes(landed)
 
             self._json({"stored": written.get("lab_results", 0),

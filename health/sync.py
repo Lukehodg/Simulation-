@@ -9,7 +9,6 @@ idempotent upsert costs a few API calls and gets the corrections.
 
 from __future__ import annotations
 
-import fcntl
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Callable
@@ -21,7 +20,7 @@ from .models import Records
 from .raw import iter_raw
 from .sources import SOURCES
 from .sources.base import Source
-from .store import Store
+from .store import Store, TABLES
 from .timeutil import isoformat, parse_ts
 
 # How far back to re-fetch on each incremental sync.
@@ -53,6 +52,29 @@ class SyncReport:
         return f"{self.source}: {self.files} payload(s) → {detail}"
 
 
+try:                       # POSIX
+    import fcntl
+
+    def _take_lock(handle) -> None:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    def _release_lock(handle) -> None:
+        fcntl.flock(handle, fcntl.LOCK_UN)
+
+except ModuleNotFoundError:  # Windows: same semantics, different call
+    import msvcrt
+
+    def _take_lock(handle) -> None:
+        try:
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError as exc:
+            raise BlockingIOError(str(exc)) from None
+
+    def _release_lock(handle) -> None:
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+
+
 @contextmanager
 def only_one(config: Config):
     """Hold a lock for the duration of a sync.
@@ -66,7 +88,7 @@ def only_one(config: Config):
     handle = lock_path.open("w")
     try:
         try:
-            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            _take_lock(handle)
         except BlockingIOError:
             raise RuntimeError(
                 "another sync is already running — this one stopped rather "
@@ -75,7 +97,9 @@ def only_one(config: Config):
         yield
     finally:
         try:
-            fcntl.flock(handle, fcntl.LOCK_UN)
+            _release_lock(handle)
+        except OSError:
+            pass
         finally:
             handle.close()
 
@@ -112,10 +136,17 @@ def sync_source(store: Store, config: Config, name: str,
         return report
 
     report.files = len(paths)
-    for path in paths:
-        records = source.parse(path)
-        report.add(store.load(records))
-        store.record_raw(path, name, path.parent.parent.name, started, parsed=True)
+    try:
+        for path in paths:
+            records = source.parse(path)
+            with store.transaction():
+                written = store.load(records)
+                store.record_raw(path, name, path.parent.parent.name, started, parsed=True)
+            report.add(written)
+    except Exception as exc:
+        store.set_cursor(name, store.get_cursor(name), ok=False, note=str(exc)[:500])
+        report.error = f"{type(exc).__name__}: {exc}"
+        return report
 
     store.set_cursor(name, isoformat(started), ok=True)
     return report
@@ -141,30 +172,46 @@ def rebuild_derived(store: Store) -> None:
 
 
 def replay(store: Store, config: Config, name: str | None = None) -> list[SyncReport]:
-    """Re-parse every raw payload we have ever landed.
+    """Replace canonical data from raw, atomically; retain operational state.
 
-    This is the whole point of keeping raw/ immutable: a parser bug is a code
-    fix and one command, not a year of lost history.
+    A failure anywhere rolls back both the replacement and derived tables.
+    The existing schema must already be compatible with the current parsers.
     """
     reports: dict[str, SyncReport] = {}
     parsers: dict[str, Source] = {}
 
-    for raw_file in iter_raw(config.raw_dir, source=name):
-        if raw_file.source not in SOURCES:
-            continue
-        parser = parsers.get(raw_file.source)
-        if parser is None:
-            parser = parsers[raw_file.source] = build_source(raw_file.source, config)
-        report = reports.setdefault(raw_file.source, SyncReport(source=raw_file.source))
-        try:
-            records: Records = parser.parse(raw_file.path)
-        except Exception as exc:  # noqa: BLE001 - report the file, keep going
-            report.error = f"{raw_file.path.name}: {type(exc).__name__}: {exc}"
-            continue
-        report.files += 1
-        report.add(store.load(records))
-
-    rebuild_derived(store)
+    files = [f for f in iter_raw(config.raw_dir, source=name) if f.source in SOURCES]
+    if not files:
+        return []  # An absent archive must never erase the live database.
+    stage = "clearing canonical tables"
+    try:
+        with store.transaction():
+            for table in (*TABLES, "raw_files"):
+                if name:
+                    store.db.execute(f"DELETE FROM {table} WHERE source = ?", [name])
+                else:
+                    store.db.execute(f"DELETE FROM {table}")
+            for raw_file in files:
+                stage = str(raw_file.path)
+                parser = parsers.get(raw_file.source)
+                if parser is None:
+                    parser = parsers[raw_file.source] = build_source(raw_file.source, config)
+                report = reports.setdefault(raw_file.source, SyncReport(source=raw_file.source))
+                records = parser.parse(raw_file.path)
+                report.add(store.load(records))
+                store.record_raw(raw_file.path, raw_file.source, raw_file.kind,
+                                 raw_file.fetched_at, parsed=True)
+                report.files += 1
+            stage = "rebuilding derived tables"
+            rebuild_derived(store)
+    except Exception as exc:
+        if not reports:
+            reports[files[0].source] = SyncReport(source=files[0].source)
+        for report in reports.values():
+            report.rows.clear()
+            report.files = 0
+            report.error = (f"replay rolled back; database unchanged ({stage}): "
+                            f"{type(exc).__name__}: {exc}")
     return list(reports.values())
 
 
@@ -185,7 +232,10 @@ def ingest_path(store: Store, config: Config, path: Path,
         landed = adder(item) if callable(adder) else \
             rawstore.copy_in(config.raw_dir, name, "export", item)
         report.files += 1
-        report.add(store.load(source.parse(landed)))
-        store.record_raw(landed, name, "export", datetime.now(timezone.utc), parsed=True)
+        records = source.parse(landed)
+        with store.transaction():
+            written = store.load(records)
+            store.record_raw(landed, name, "export", datetime.now(timezone.utc), parsed=True)
+        report.add(written)
     rebuild_derived(store)
     return report
