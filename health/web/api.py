@@ -198,7 +198,9 @@ def today_payload(store: Store, config: Config, day: date | None = None) -> dict
 
     return {
         "date": str(day),
-        "date_label": day.strftime("%A %-d %B"),
+        # Not strftime("%A %-d %B"): the no-padding flag is a glibc extension
+        # and raises on Windows.
+        "date_label": f"{day:%A} {day.day} {day:%B}",
         "showing_older_day": str(fell_back_to) if fell_back_to else None,
         "verdict": _verdict(store, day, values, off),
         "readout": readout,

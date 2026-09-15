@@ -71,7 +71,10 @@ def executable() -> str:
     """The `health` next to the interpreter running us, not whatever is on a
     PATH that launchd will not have."""
     candidate = Path(sys.executable).with_name("health")
-    return str(candidate if candidate.exists() else "health")
+    for path in (candidate, candidate.with_suffix(".exe")):
+        if path.exists():
+            return str(path)
+    return "health"
 
 
 def plan(config: Config, times: str | None = None, job: str = "sync",
