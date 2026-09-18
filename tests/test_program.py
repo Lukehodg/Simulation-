@@ -415,6 +415,44 @@ def test_protein_target_needs_a_bodyweight(gym):
     assert "85 kg" in protein.why
 
 
+def _energy(store, day: date, kcal_in: float | None, kcal_out: float | None) -> None:
+    obs = []
+    for metric, value, source in (("energy_intake", kcal_in, "apple_health"),
+                                  ("energy_expenditure", kcal_out, "whoop")):
+        if value is not None:
+            obs.append(Observation(source=source, source_id=f"{metric}-{day}", metric=metric,
+                                   value=value, unit="kcal", local_date=day,
+                                   ts=datetime.combine(day, datetime.min.time(),
+                                                       tzinfo=timezone.utc)))
+    store.load(Records(observations=obs))
+
+
+def test_energy_balance_reads_in_minus_out_against_the_recomp_deficit(gym):
+    for offset in range(4):
+        _weigh(gym, MONDAY - timedelta(days=offset), 90.0)
+    _energy(gym, MONDAY - timedelta(days=1), 2100.0, 2300.0)
+    energy = program.energy_balance(gym, MONDAY)
+    assert energy.deficit_target == 500                  # 0.45 kg/wk of fat, to the nearest 50
+    assert energy.yesterday_balance == -200
+    assert "short" in energy.why                          # 300 kcal short of -500
+
+
+def test_energy_balance_treats_a_barely_logged_day_as_not_logged(gym):
+    _energy(gym, MONDAY - timedelta(days=1), 640.0, 2300.0)     # dinner never logged
+    energy = program.energy_balance(gym, MONDAY)
+    assert energy.yesterday_balance is None
+    assert "intake not logged" in energy.why
+
+
+def test_energy_balance_needs_both_sides_for_the_week(gym):
+    _energy(gym, MONDAY - timedelta(days=1), 2000.0, 2500.0)
+    _energy(gym, MONDAY - timedelta(days=2), 2000.0, None)       # no WHOOP that day
+    _energy(gym, MONDAY - timedelta(days=3), 2200.0, 2600.0)
+    energy = program.energy_balance(gym, MONDAY)
+    assert energy.week_days == 2
+    assert energy.week_balance == -450
+
+
 def test_the_plan_serialises_for_the_agent(gym):
     plan = program.plan_session(gym, MONDAY)
     data = plan.as_dict()

@@ -1054,6 +1054,8 @@ def _print_plan(plan, pushed: str | None = None) -> None:
     if plan.protein:
         target = f"{plan.protein.target_g} g" if plan.protein.target_g else "—"
         print(f"protein {target} — {plan.protein.why}")
+    if plan.energy:
+        print(f"energy  -{plan.energy.deficit_target} kcal/day — {plan.energy.why}")
 
     if plan.volume:
         cells = ", ".join(f"{v.muscle} {v.sets:.0f} ({v.verdict})" for v in plan.volume)

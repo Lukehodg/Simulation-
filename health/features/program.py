@@ -613,6 +613,77 @@ def protein_target(store: Store, day: date) -> Protein:
     return Protein(target, yesterday, why)
 
 
+# -- energy balance ------------------------------------------------------------
+#
+# Steps are a proxy for expenditure; WHOOP's daily kilojoules are the thing
+# itself. With intake logged on the other side, the deficit stops being a
+# guess: in minus out, against the deficit the recomposition band implies.
+
+#: One kilogram of fat is roughly 7,700 kcal; a week is seven days.
+KCAL_PER_KG_FAT = 7_700
+#: An intake below this is almost always a day where logging stopped, not a
+#: day of fasting. Counting it would turn a forgotten dinner into a deficit.
+INTAKE_LOGGED_FLOOR_KCAL = 1_000
+
+
+@dataclass
+class EnergyBalance:
+    deficit_target: int                   # kcal/day, positive number
+    yesterday_in: float | None
+    yesterday_out: float | None
+    yesterday_balance: float | None       # in - out; negative is a deficit
+    week_balance: float | None            # mean over the last 7 complete days
+    week_days: int
+    why: str
+
+    def as_dict(self) -> dict:
+        return {"deficit_target": self.deficit_target,
+                "yesterday": {"in": self.yesterday_in, "out": self.yesterday_out,
+                              "balance": self.yesterday_balance},
+                "week_mean_balance": self.week_balance, "week_days": self.week_days,
+                "why": self.why}
+
+
+def energy_balance(store: Store, day: date) -> EnergyBalance:
+    """Yesterday's and the week's energy balance against the deficit the fat
+    loss band asks for. Days with only one side logged are left out of the
+    week rather than counted as a zero on the missing side."""
+    _trend, weight = weight_trend(store, day)
+    weight = weight or 90.0
+    lo_pct, hi_pct = LOSS_BAND_PCT
+    target = int(round(weight * (lo_pct + hi_pct) / 2 / 100 * KCAL_PER_KG_FAT / 7 / 50) * 50)
+
+    rows = store.query(
+        "SELECT local_date, kcal_in, kcal_out FROM daily "
+        "WHERE local_date BETWEEN ? AND ? ORDER BY local_date",
+        [day - timedelta(days=7), day - timedelta(days=1)])
+    rows = [(d, i if i is not None and i >= INTAKE_LOGGED_FLOOR_KCAL else None, o)
+            for d, i, o in rows]
+    complete = [(d, float(i), float(o)) for d, i, o in rows if i is not None and o is not None]
+    yesterday = next(((i, o) for d, i, o in rows if d == day - timedelta(days=1)), (None, None))
+    y_in = float(yesterday[0]) if yesterday[0] is not None else None
+    y_out = float(yesterday[1]) if yesterday[1] is not None else None
+    y_bal = (y_in - y_out) if y_in is not None and y_out is not None else None
+    week = mean(i - o for _, i, o in complete) if complete else None
+
+    if y_bal is None:
+        missing = "intake" if y_in is None and y_out is not None else                   "expenditure" if y_out is None and y_in is not None else "intake and expenditure"
+        why = f"aim for -{target} kcal/day; yesterday's {missing} not logged"
+    else:
+        gap = y_bal + target                      # 0 when exactly on target
+        if abs(gap) <= 150:
+            why = f"yesterday {y_in:.0f} in, {y_out:.0f} out = {y_bal:+.0f}: on target"
+        elif gap > 0:
+            why = (f"yesterday {y_in:.0f} in, {y_out:.0f} out = {y_bal:+.0f}: "
+                   f"{gap:.0f} kcal short of the -{target} target, move more or eat less")
+        else:
+            why = (f"yesterday {y_in:.0f} in, {y_out:.0f} out = {y_bal:+.0f}: "
+                   f"{-gap:.0f} kcal past the -{target} target, eat more — this is a recomp, not a crash")
+    if week is not None:
+        why += f"; 7-day mean {week:+.0f} over {len(complete)} complete days"
+    return EnergyBalance(target, y_in, y_out, y_bal, week, len(complete), why)
+
+
 # -- the session -------------------------------------------------------------
 
 @dataclass
@@ -644,6 +715,7 @@ class SessionPlan:
     cardio: Cardio | None = None
     steps: Steps | None = None
     protein: Protein | None = None
+    energy: EnergyBalance | None = None
     volume: list[MuscleVolume] = field(default_factory=list)
     readiness: str | None = None
     adjustments: list[str] = field(default_factory=list)
@@ -662,6 +734,7 @@ class SessionPlan:
             "cardio": self.cardio.as_dict() if self.cardio else None,
             "steps": self.steps.as_dict() if self.steps else None,
             "protein": self.protein.as_dict() if self.protein else None,
+            "energy": self.energy.as_dict() if self.energy else None,
             "priority_volume": [v.as_dict() for v in self.volume],
             "unmatched": self.unmatched,
         }
@@ -701,6 +774,7 @@ def plan_session(store: Store, day: date | None = None, *,
 
     plan.steps = step_target(store, day, kind)
     plan.protein = protein_target(store, day)
+    plan.energy = energy_balance(store, day)
     plan.volume = priority_volume(store, day)
 
     if kind == "rest":

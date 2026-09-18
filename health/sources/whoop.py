@@ -309,9 +309,12 @@ class WhoopSource(Source):
         self._observe(records, start, day, M.STRAIN, _score(item, "strain"), sid)
         self._observe(records, start, day, M.HR_AVG, _score(item, "average_heart_rate"), sid)
         self._observe(records, start, day, M.HR_MAX, _score(item, "max_heart_rate"), sid)
+        # A cycle's kilojoules are the whole day's burn, basal included — not
+        # the exercise-only figure Apple and Garmin call active energy. Filing
+        # it there would feed a 2,300 kcal "workout" into energy availability.
         kj = _score(item, "kilojoule")
         if kj is not None:
-            self._observe(records, start, day, M.ACTIVE_ENERGY, kj / KJ_PER_KCAL, sid)
+            self._observe(records, start, day, M.ENERGY_EXPENDITURE, kj / KJ_PER_KCAL, sid)
 
     def _parse_workout(self, item: dict, records: Records) -> None:
         sid = _record_id(item)

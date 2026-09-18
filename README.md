@@ -256,6 +256,11 @@ Three things it does that a programme on paper cannot:
     not built in a steep deficit. With no bodyweight logged it says so instead
     of adapting to nothing. A protein target (2 g/kg) rides alongside, checked
     against yesterday's logged intake when nutrition data is connected.
+  * **Energy balance, not just steps.** WHOOP reports the whole day's burn;
+    with intake logged on the other side, the plan states yesterday's in − out
+    against the deficit the band implies (about 500 kcal/day at 90 kg), and
+    the seven-day mean over days where both sides exist. An intake under
+    1,000 kcal is treated as a day where logging stopped, not a fast.
 
 Every sixth week — counted from your first logged workout, not the calendar —
 deloads on its own: 85% load, one set fewer, cardio halved.

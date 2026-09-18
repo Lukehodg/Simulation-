@@ -37,6 +37,7 @@ SELECT
     MAX(CASE WHEN metric = 'strain'         THEN value END) AS strain,
     MAX(CASE WHEN metric = 'steps'          THEN value END) AS steps,
     MAX(CASE WHEN metric = 'energy_intake'  THEN value END) AS kcal_in,
+    MAX(CASE WHEN metric = 'energy_expenditure' THEN value END) AS kcal_out,
     MAX(CASE WHEN metric = 'protein'        THEN value END) AS protein_g,
     MAX(CASE WHEN metric = 'body_mass'      THEN value END) AS weight_kg
 FROM daily_metrics

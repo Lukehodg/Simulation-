@@ -43,7 +43,8 @@ WRIST_TEMP = "wrist_temp"                   # degC
 
 # Activity
 STEPS = "steps"                             # count
-ACTIVE_ENERGY = "active_energy"             # kcal
+ACTIVE_ENERGY = "active_energy"             # kcal, exercise/movement only (Apple, Garmin)
+ENERGY_EXPENDITURE = "energy_expenditure"   # kcal, whole-day burn incl. basal (WHOOP)
 BASAL_ENERGY = "basal_energy"               # kcal
 EXERCISE_MINUTES = "exercise_minutes"       # min
 
@@ -81,6 +82,7 @@ UNITS: dict[str, str] = {
     BODY_MASS: "kg", BODY_FAT: "%", LEAN_MASS: "kg",
     SKIN_TEMP_DEV: "degC", WRIST_TEMP: "degC",
     STEPS: "count", ACTIVE_ENERGY: "kcal", BASAL_ENERGY: "kcal", EXERCISE_MINUTES: "min",
+    ENERGY_EXPENDITURE: "kcal",
     ENERGY_INTAKE: "kcal", PROTEIN: "g", CARBS: "g", FAT: "g", FIBRE: "g",
     SODIUM: "mg", CAFFEINE: "mg", WATER: "ml", ALCOHOL: "units",
     BP_SYSTOLIC: "mmHg", BP_DIASTOLIC: "mmHg", BP_PULSE: "bpm",
@@ -99,6 +101,7 @@ SOURCE_PRIORITY: dict[str, list[str]] = {
     STRAIN: ["whoop"],
     STEPS: ["garmin_fit", "garmin_export", "apple_health"],
     ACTIVE_ENERGY: ["garmin_fit", "garmin_export", "apple_health"],
+    ENERGY_EXPENDITURE: ["whoop", "garmin_fit", "garmin_export"],
     BODY_MASS: ["apple_health", "garmin_export", "whoop", "checkin"],
     ENERGY_INTAKE: ["mfp_csv", "apple_health"],
     PROTEIN: ["mfp_csv", "apple_health"],
