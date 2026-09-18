@@ -15,6 +15,7 @@ from typing import Callable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from . import lockfile
 from .config import Config
 from .models import Records
 from .raw import iter_raw
@@ -52,29 +53,6 @@ class SyncReport:
         return f"{self.source}: {self.files} payload(s) → {detail}"
 
 
-try:                       # POSIX
-    import fcntl
-
-    def _take_lock(handle) -> None:
-        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-
-    def _release_lock(handle) -> None:
-        fcntl.flock(handle, fcntl.LOCK_UN)
-
-except ModuleNotFoundError:  # Windows: same semantics, different call
-    import msvcrt
-
-    def _take_lock(handle) -> None:
-        try:
-            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-        except OSError as exc:
-            raise BlockingIOError(str(exc)) from None
-
-    def _release_lock(handle) -> None:
-        handle.seek(0)
-        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-
-
 @contextmanager
 def only_one(config: Config):
     """Hold a lock for the duration of a sync.
@@ -84,24 +62,14 @@ def only_one(config: Config):
     like a bug rather than a queue.
     """
     config.data_dir.mkdir(parents=True, exist_ok=True)
-    lock_path = config.data_dir / "sync.lock"
-    handle = lock_path.open("w")
     try:
-        try:
-            _take_lock(handle)
-        except BlockingIOError:
-            raise RuntimeError(
-                "another sync is already running — this one stopped rather "
-                "than fighting it for the database"
-            ) from None
-        yield
-    finally:
-        try:
-            _release_lock(handle)
-        except OSError:
-            pass
-        finally:
-            handle.close()
+        with lockfile.held(config.data_dir / "sync.lock", wait=False):
+            yield
+    except BlockingIOError:
+        raise RuntimeError(
+            "another sync is already running — this one stopped rather "
+            "than fighting it for the database"
+        ) from None
 
 
 def build_source(name: str, config: Config) -> Source:

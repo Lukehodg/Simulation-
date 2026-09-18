@@ -25,6 +25,7 @@ from typing import Any, Iterator
 import httpx
 
 from .. import metrics as M
+from .. import lockfile
 from .. import raw as rawstore
 from ..models import CycleEvent, Observation, Records, Sleep, Workout
 from ..secrets import get_secret, read_tokens, write_tokens
@@ -144,33 +145,56 @@ class WhoopSource(Source):
         self._tokens = tokens
         return tokens
 
-    def _access_token(self) -> str:
+    def _access_token(self, *, force_refresh: bool = False) -> str:
         tokens = self._tokens or read_tokens(self.config.config_dir, self.name)
         if not tokens:
             raise RuntimeError("WHOOP is not authorised yet — run `health auth whoop`.")
-        expires_at = parse_ts(tokens.get("expires_at"))
-        if expires_at and expires_at > datetime.now(timezone.utc):
+        if not force_refresh and self._still_valid(tokens):
             self._tokens = tokens
             return tokens["access_token"]
 
-        client_id, client_secret = self._client_credentials()
-        response = httpx.post(TOKEN_URL, data={
-            "grant_type": "refresh_token",
-            "refresh_token": tokens["refresh_token"],
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "scope": "offline",
-        }, timeout=30.0)
-        response.raise_for_status()
-        return self._store_tokens(response.json())["access_token"]
+        # WHOOP rotates the refresh token on every use and revokes the whole
+        # grant if a stale one is presented. Two processes refreshing at the
+        # same moment (the scheduled sync beside a manual one) is exactly how
+        # that happens, so refresh under a lock and re-read first: the other
+        # process may already have done it.
+        with lockfile.held(self.config.config_dir / "tokens" / f"{self.name}.lock"):
+            fresh = read_tokens(self.config.config_dir, self.name) or tokens
+            if not force_refresh and self._still_valid(fresh)                     and fresh.get("access_token") != tokens.get("access_token"):
+                self._tokens = fresh
+                return fresh["access_token"]
+            client_id, client_secret = self._client_credentials()
+            response = httpx.post(TOKEN_URL, data={
+                "grant_type": "refresh_token",
+                "refresh_token": fresh["refresh_token"],
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "scope": "offline",
+            }, timeout=30.0)
+            if response.status_code == 400:
+                raise RuntimeError(
+                    "WHOOP rejected the refresh token — the grant has been revoked "
+                    "(usually two refreshes at once). Run `health auth whoop` again.")
+            response.raise_for_status()
+            return self._store_tokens(response.json())["access_token"]
+
+    @staticmethod
+    def _still_valid(tokens: dict) -> bool:
+        expires_at = parse_ts(tokens.get("expires_at"))
+        return bool(expires_at and expires_at > datetime.now(timezone.utc))
 
     # -- fetch -------------------------------------------------------------
 
-    def _page(self, path: str, params: dict) -> dict:
+    def _page(self, path: str, params: dict, *, retried: bool = False) -> dict:
         response = self.client.get(
             path, params=params,
             headers={"Authorization": f"Bearer {self._access_token()}"},
         )
+        if response.status_code == 401 and not retried:
+            # The token looked valid by its own clock but the server disagrees
+            # — another process rotated it. Refresh once, then give up.
+            self._access_token(force_refresh=True)
+            return self._page(path, params, retried=True)
         if response.status_code == 429:
             retry_after = float(response.headers.get("Retry-After", 60))
             time.sleep(retry_after)

@@ -12,6 +12,17 @@ from health.store import Store
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
+@pytest.fixture(autouse=True)
+def isolated_credentials(tmp_path: Path, monkeypatch):
+    """Every test gets its own credentials directory.
+
+    `Config.config_dir` reads HEALTH_CONFIG_DIR or falls back to the user's
+    real ~/.config/health. A test that stores tokens through the same path
+    production uses would otherwise overwrite the user's live WHOOP grant
+    with fake ones — which is not hypothetical."""
+    monkeypatch.setenv("HEALTH_CONFIG_DIR", str(tmp_path / "config"))
+
+
 @pytest.fixture
 def config(tmp_path: Path) -> Config:
     return Config(
