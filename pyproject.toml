@@ -16,6 +16,8 @@ dependencies = [
     "mcp>=2.0",
     # Reading a blood panel with Claude — the one call that leaves the machine.
     "anthropic>=1.0",
+    # The chart card attached to the morning notification.
+    "matplotlib>=3.8",
 ]
 
 [project.optional-dependencies]

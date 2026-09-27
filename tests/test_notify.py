@@ -81,8 +81,8 @@ class _Response:
 def _fake_post(monkeypatch, response, seen: dict):
     import httpx
 
-    def post(url, data=None, timeout=None):
-        seen["url"], seen["data"] = url, data
+    def post(url, data=None, files=None, timeout=None):
+        seen["url"], seen["data"], seen["files"] = url, data, files
         return response
 
     monkeypatch.setattr(httpx, "post", post)
@@ -230,3 +230,25 @@ def test_status_reports_nothing_configured(tmp_path):
 
     assert ready is False
     assert "not configured" in detail
+
+
+def test_the_chart_card_rides_along_as_an_attachment(monkeypatch):
+    seen: dict = {}
+    _fake_post(monkeypatch, _Response(200, {"status": 1}), seen)
+
+    notify.send_pushover("u", "t", "the brief", image=b"\x89PNG fake")
+
+    name, body, mime = seen["files"]["attachment"]
+    assert (name, mime) == ("brief.png", "image/png")
+    assert body == b"\x89PNG fake"
+
+
+def test_an_oversized_image_is_dropped_not_the_message(monkeypatch):
+    seen: dict = {}
+    _fake_post(monkeypatch, _Response(200, {"status": 1}), seen)
+
+    notify.send_pushover("u", "t", "the brief",
+                         image=b"x" * (notify.PUSHOVER_MAX_ATTACHMENT + 1))
+
+    assert seen["files"] is None
+    assert seen["data"]["message"] == "the brief"

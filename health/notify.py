@@ -32,6 +32,8 @@ MAX_CHARS = 1400
 PUSHOVER_MAX_CHARS = 1024
 PUSHOVER_MAX_TITLE = 250
 PUSHOVER_ENDPOINT = "https://api.pushover.net/1/messages.json"
+#: Pushover's attachment limit, 5 MB. The chart card is well under 1 MB.
+PUSHOVER_MAX_ATTACHMENT = 5 * 1024 * 1024
 
 # `participant` is the modern term; older macOS wants `buddy`. Try both so this
 # does not become a per-OS-version support thread.
@@ -87,7 +89,8 @@ def send_imessage(handle: str, text: str, timeout: float = 30.0) -> None:
 
 
 def send_pushover(user_key: str, token: str, text: str, *,
-                  title: str | None = None, timeout: float = 30.0) -> None:
+                  title: str | None = None, image: bytes | None = None,
+                  timeout: float = 30.0) -> None:
     """Push `text` to the devices on `user_key`. Raises NotifyError on failure.
 
     Pushover answers 200 with `{"status": 1}` on success and 4xx with an
@@ -101,8 +104,15 @@ def send_pushover(user_key: str, token: str, text: str, *,
     if title:
         payload["title"] = title[:PUSHOVER_MAX_TITLE]
 
+    # One image rides along as a multipart attachment; past Pushover's own
+    # limit it is dropped rather than costing the whole message.
+    files = None
+    if image and len(image) <= PUSHOVER_MAX_ATTACHMENT:
+        files = {"attachment": ("brief.png", image, "image/png")}
+
     try:
-        response = httpx.post(PUSHOVER_ENDPOINT, data=payload, timeout=timeout)
+        response = httpx.post(PUSHOVER_ENDPOINT, data=payload, files=files,
+                              timeout=timeout)
     except httpx.HTTPError as exc:
         raise NotifyError(f"could not reach Pushover: {exc}") from exc
 
@@ -150,7 +160,8 @@ def status(config) -> tuple[bool, str]:
                    "PUSHOVER_API_TOKEN, or HEALTH_NOTIFY_IMESSAGE on macOS")
 
 
-def send(config, text: str, *, title: str | None = None) -> str:
+def send(config, text: str, *, title: str | None = None,
+         image: bytes | None = None) -> str:
     """Deliver on whichever channel is configured. Returns the channel's name.
 
     The one place that knows how the brief and the alerts reach a phone, so
@@ -167,7 +178,8 @@ def send(config, text: str, *, title: str | None = None) -> str:
                 "HEALTH_PUSHOVER_USER is set but PUSHOVER_API_TOKEN is not — "
                 "add `PUSHOVER_API_TOKEN=...` to .env, or to the Keychain as "
                 "the README describes")
-        send_pushover(config.notify_pushover_user, token, text, title=title)
+        send_pushover(config.notify_pushover_user, token, text, title=title,
+                      image=image)
         return "pushover"
 
     if channel == "imessage":

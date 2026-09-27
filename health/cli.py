@@ -751,6 +751,23 @@ def cmd_energy(args, config) -> int:
     return 0
 
 
+def _brief_card(store, config) -> bytes | None:
+    """Today's chart card as PNG, or None if it cannot or need not be drawn."""
+    import os
+
+    try:
+        from . import briefcard
+    except ImportError:          # matplotlib not installed: text only
+        return None
+    theme = os.environ.get("HEALTH_CARD_THEME", "dark").strip().lower()
+    try:
+        return briefcard.render_png(store, theme=theme if theme in briefcard.THEMES
+                                    else "dark")
+    except Exception as exc:  # noqa: BLE001 - the picture is optional
+        print(f"chart card not drawn: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return None
+
+
 def cmd_brief(args, config) -> int:
     import json as _json
 
@@ -773,6 +790,13 @@ def cmd_brief(args, config) -> int:
                                         question=args.ask)
         except Exception as exc:  # noqa: BLE001 - a briefing, not a crash site
             raise SystemExit(f"{type(exc).__name__}: {exc}")
+
+        # The picture that rides along with the notification. Drawn here, while
+        # the database is open; a card that cannot be drawn costs the picture,
+        # never the brief.
+        card = None
+        if args.notify and span == "today":
+            card = _brief_card(store, config)
 
     if args.json:
         print(_json.dumps({"span": result.span, "text": result.text,
@@ -803,7 +827,8 @@ def cmd_brief(args, config) -> int:
 
         try:
             channel = notify_mod.send(config, result.text,
-                                      title=f"{span} brief · {date.today()}")
+                                      title=f"{span} brief · {date.today()}",
+                                      image=card)
             print(f"sent over {channel}", file=sys.stderr)
         except notify_mod.NotifyError as exc:
             print(f"delivery failed: {exc}", file=sys.stderr)
