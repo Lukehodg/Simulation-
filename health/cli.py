@@ -22,6 +22,7 @@
     health sql "SELECT ..."     ask the database directly
     health mcp                  serve the tools Claude calls (stdio)
     health serve                open the interface in a browser
+    health notify [--test]      is the phone channel set up, and does it deliver
     health schedule             run the sync automatically, twice a day
     health backup               archive raw/ — the part that cannot be refetched
 """
@@ -486,10 +487,15 @@ SETUP_HINTS = {
 
 
 def cmd_doctor(args, config) -> int:
+    from . import notify as notify_mod
+
     print(f"root       {config.root}")
     print(f"database   {config.db_path} ({'exists' if config.db_path.exists() else 'missing'})")
     print(f"timezone   {config.timezone}")
-    print(f"apple dir  {config.apple_export_dir or 'not set'}\n")
+    print(f"apple dir  {config.apple_export_dir or 'not set'}")
+    # Optional, so it does not count towards the exit code — but it is the one
+    # setting whose failure shows up as silence rather than an error.
+    print(f"notify     {notify_mod.status(config)[1]}\n")
 
     problems = 0
     for name in SOURCES:
@@ -505,6 +511,36 @@ def cmd_doctor(args, config) -> int:
             for line in SETUP_HINTS.get(name, []):
                 print(f"     {line}")
     return 1 if problems else 0
+
+
+def cmd_notify(args, config) -> int:
+    """Is the phone channel set up, and does it actually deliver.
+
+    Separate from `brief --notify` on purpose: that one cannot fail without
+    also spending an Anthropic call, and a delivery problem then looks like a
+    brief problem. This tests one thing.
+    """
+    from . import notify as notify_mod
+
+    ready, detail = notify_mod.status(config)
+    print(f"[{'ok' if ready else '--'}] {detail}")
+
+    if not args.test:
+        if ready:
+            print("\n`health notify --test` sends one to your phone now.")
+        return 0 if ready else 1
+
+    if not ready:
+        return 1
+    try:
+        channel = notify_mod.send(
+            config, "If this arrived, the morning brief will too.",
+            title=f"health · test · {date.today()}")
+    except notify_mod.NotifyError as exc:
+        print(f"\ndelivery failed: {exc}")
+        return 1
+    print(f"\nsent over {channel} — check your phone.")
+    return 0
 
 
 def cmd_schedule(args, config) -> int:
@@ -1321,6 +1357,12 @@ def build_parser() -> argparse.ArgumentParser:
                              help="show recent check-ins instead of logging one")
     checkin_cmd.add_argument("--days", type=int, default=14)
     checkin_cmd.set_defaults(fn=cmd_checkin)
+
+    notify_cmd = sub.add_parser("notify", help="is the phone channel set up, "
+                                               "and does it deliver")
+    notify_cmd.add_argument("--test", action="store_true",
+                            help="send one message to your phone now")
+    notify_cmd.set_defaults(fn=cmd_notify)
 
     alert_cmd = sub.add_parser("alert", help="illness watch, a BP escalation, "
                                              "or a compound marker trending — "

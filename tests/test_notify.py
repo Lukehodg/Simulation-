@@ -195,3 +195,38 @@ def test_sending_with_nothing_configured_is_an_error_not_a_silent_no_op(tmp_path
     """A brief that quietly went nowhere looks exactly like a quiet morning."""
     with pytest.raises(notify.NotifyError, match="no delivery channel"):
         notify.send(_config(tmp_path), "hi")
+
+
+def test_status_catches_a_user_key_with_no_token(tmp_path, monkeypatch):
+    """The half-finished shape this is usually in, and the one whose failure
+    turns up at 07:45 rather than at a prompt."""
+    monkeypatch.delenv("PUSHOVER_API_TOKEN", raising=False)
+    ready, detail = notify.status(_config(tmp_path, notify_pushover_user="u"))
+
+    assert ready is False
+    assert "PUSHOVER_API_TOKEN" in detail
+
+
+def test_status_is_happy_with_both_halves(tmp_path, monkeypatch):
+    monkeypatch.setenv("PUSHOVER_API_TOKEN", "app-token")
+    ready, detail = notify.status(_config(tmp_path, notify_pushover_user="u"))
+
+    assert ready is True
+    assert "pushover" in detail
+
+
+def test_status_says_imessage_cannot_deliver_off_a_mac(tmp_path, monkeypatch):
+    import platform
+
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
+    ready, detail = notify.status(_config(tmp_path, notify_imessage="+15551234567"))
+
+    assert ready is False
+    assert "macOS only" in detail and "HEALTH_PUSHOVER_USER" in detail
+
+
+def test_status_reports_nothing_configured(tmp_path):
+    ready, detail = notify.status(_config(tmp_path))
+
+    assert ready is False
+    assert "not configured" in detail

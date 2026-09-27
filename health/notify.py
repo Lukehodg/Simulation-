@@ -22,6 +22,7 @@ one is in use. `HEALTH_NOTIFY_CHANNEL` forces it when both are configured.
 
 from __future__ import annotations
 
+import platform
 import subprocess
 
 #: iMessage delivers long texts fine, but a wall of text is a bad notification.
@@ -120,6 +121,33 @@ def send_pushover(user_key: str, token: str, text: str, *,
                    "and the PUSHOVER_API_TOKEN secret (the application token you "
                    "created at pushover.net/apps)")
     raise NotifyError(detail)
+
+
+def status(config) -> tuple[bool, str]:
+    """(ready, one line saying why) — the configuration, without sending.
+
+    Both halves of Pushover are checked, because a user key with no token is
+    the shape this is most often half-set-up in, and the failure otherwise
+    turns up at 07:45 on a morning nobody is watching.
+    """
+    from .secrets import get_secret
+
+    channel = config.notify_channel
+    if channel == "pushover":
+        if not get_secret("PUSHOVER_API_TOKEN", config.config_dir, required=False):
+            return False, ("pushover — user key set, but PUSHOVER_API_TOKEN is "
+                           "missing (create an application at pushover.net/apps)")
+        return True, "pushover — user key and application token both set"
+
+    if channel == "imessage":
+        if platform.system() != "Darwin":
+            return False, (f"imessage ({config.notify_imessage}) — but osascript "
+                           f"is macOS only, so nothing can be delivered from "
+                           f"here; set HEALTH_PUSHOVER_USER instead")
+        return True, f"imessage — {config.notify_imessage}"
+
+    return False, ("not configured — set HEALTH_PUSHOVER_USER and "
+                   "PUSHOVER_API_TOKEN, or HEALTH_NOTIFY_IMESSAGE on macOS")
 
 
 def send(config, text: str, *, title: str | None = None) -> str:

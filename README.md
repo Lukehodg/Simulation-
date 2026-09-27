@@ -829,6 +829,20 @@ overrides that. With neither, `--notify` stops with a sentence saying so rather
 than succeeding silently — a brief that went nowhere looks exactly like a quiet
 morning.
 
+Check it before trusting a 07:45 job to it:
+
+```sh
+health notify          # which channel, and whether both halves are set
+health notify --test   # send one to your phone now
+```
+
+A user key with no application token is the shape this is usually half-set-up
+in, and `health notify` names that specifically rather than reporting a generic
+failure. It is deliberately separate from `brief --notify`, which cannot be
+tested without also spending an Anthropic call — and then a delivery problem
+looks like a brief problem. `health doctor` prints the same line among the rest
+of the configuration.
+
 Pushover is the only third party in this project besides Anthropic, and it is
 worth being clear about what that means: the brief names compounds, weights and
 markers, and on that channel the text passes through servers you do not own.
