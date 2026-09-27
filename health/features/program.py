@@ -741,7 +741,7 @@ class SessionPlan:
 
 
 def plan_session(store: Store, day: date | None = None, *,
-                 auto_regulate: bool = True) -> SessionPlan:
+                 auto_regulate: bool = True, kind: str | None = None) -> SessionPlan:
     """Today's session: the lifts, the cardio and the step target.
 
     With `auto_regulate`, `readiness()` decides whether loads advance at all —
@@ -749,7 +749,9 @@ def plan_session(store: Store, day: date | None = None, *,
     the whole point of having recovery data in the same database.
     """
     day = day or date.today()
-    kind = day_type(day)
+    if kind is not None and kind not in WEEK:
+        raise ValueError(f"unknown session {kind!r}; one of {', '.join(sorted(set(WEEK)))}")
+    kind = kind or day_type(day)
     deload = is_deload(day, training_anchor(store, day))
 
     title = f"AI {kind.title()}" + (" (deload)" if deload and kind != "rest" else "")
@@ -805,12 +807,15 @@ def plan_session(store: Store, day: date | None = None, *,
                              deload=deload, hold=hold or back_off)
         sets = max(2, target.sets - 1) if back_off else target.sets
         weight = target.weight_kg
+        why = target.why
         if back_off and weight:
-            weight = _round_to(weight * 0.9, increment or 2.5)
+            trimmed = _round_to(weight * 0.9, _step(weight, increment) or 2.5)
+            why = f"recovery says back off — {trimmed:g} kg is 90% of your {weight:g} kg"
+            weight = trimmed
         plan.exercises.append(PlannedExercise(
             slot=slot.label, exercise=template["title"], template_id=template["template_id"],
             sets=sets, reps=target.reps, reps_range=target.reps_range, weight_kg=weight,
-            rest_seconds=REST_SECONDS.get(slot.role, 120), why=target.why, cue=slot.cue,
+            rest_seconds=REST_SECONDS.get(slot.role, 120), why=why, cue=slot.cue,
         ))
 
     cardio_kind = "hiit" if kind == HIIT_DAY else "zone2"

@@ -16,6 +16,7 @@
     health checkin [--bp S/D]   blood pressure, weight and how you feel, vs the numbers
     health experiment start ... pre-register an n-of-1 trial and test it
     health plan [--push]        today's session from your own sets, into Hevy
+    health dashboard --out F    the document the phone dashboard reads
     health lifts [EXERCISE]     strength progression, or one exercise's history
     health volume [--weeks N]   weekly tonnage by muscle group
     health sql "SELECT ..."     ask the database directly
@@ -1114,7 +1115,8 @@ def cmd_plan(args, config) -> int:
         return 0
 
     with _store(config, read_only=not args.push) as store:
-        plan = program_features.plan_session(store, day, auto_regulate=not args.no_regulate)
+        plan = program_features.plan_session(store, day, auto_regulate=not args.no_regulate,
+                                             kind=args.session)
         pushed = None
         if args.push and plan.is_rest:
             print("Rest day — nothing to push.\n")
@@ -1123,6 +1125,34 @@ def cmd_plan(args, config) -> int:
                 print("Some slots did not resolve; push anyway with the ones that did.\n")
             pushed = _push_plan(store, config, plan)
         _print_plan(plan, pushed)
+    return 0
+
+
+def cmd_dashboard(args, config) -> int:
+    """Write the document the phone dashboard reads, or apply what it sent back."""
+    import json
+
+    from .features import bundle as bundle_features
+
+    if args.apply:
+        payload = json.loads(Path(args.apply).expanduser().read_text(encoding="utf-8"))
+        requests = payload if isinstance(payload, list) else [payload]
+        with _store(config) as store:
+            for request in requests:
+                print(f"{request.get('id', '?')}: "
+                      f"{bundle_features.apply_request(store, config, request)}")
+        return 0
+
+    with _store(config, read_only=True) as store:
+        document = bundle_features.build(store)
+    text = json.dumps(document, indent=1, default=str)
+    if args.out:
+        out = Path(args.out).expanduser()
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(text, encoding="utf-8")
+        print(f"{out} — {document['date']}, {len(document['days'])} days")
+    else:
+        print(text)
     return 0
 
 
@@ -1325,7 +1355,16 @@ def build_parser() -> argparse.ArgumentParser:
                           help="the next seven days, read only")
     plan_cmd.add_argument("--no-regulate", action="store_true",
                           help="ignore readiness and plan the session as written")
+    plan_cmd.add_argument("--session", choices=["push", "pull", "legs", "upper", "lower", "rest"],
+                          help="override the split: plan this session type instead of today's")
     plan_cmd.set_defaults(fn=cmd_plan)
+
+    dashboard = sub.add_parser("dashboard", help="the document the phone dashboard "
+                                            "reads, and the requests it sends back")
+    dashboard.add_argument("--out", help="write the document here instead of stdout")
+    dashboard.add_argument("--apply", metavar="FILE",
+                           help="apply requests from the dashboard (JSON list)")
+    dashboard.set_defaults(fn=cmd_dashboard)
 
     volume = sub.add_parser("volume", help="weekly tonnage by muscle group")
     volume.add_argument("--weeks", type=int, default=8)
