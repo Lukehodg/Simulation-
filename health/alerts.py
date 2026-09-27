@@ -13,10 +13,12 @@ this module decides *whether* to speak, not what to say.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 
 from .features import checkin as checkin_features
+from .features import energy as energy_features
 from .features import protocol as protocol_features
 from .features import readiness as readiness_features
 from .store import Store
@@ -45,6 +47,13 @@ def check(store: Store, as_of: date | None = None) -> list[Alert]:
     if bp.get("verdict") == "see a doctor":
         out.append(Alert("bp_escalate", f"Blood pressure: {bp['note']}"))
 
+    # The reachable half of `energy.py`. A GLP-1's `monitor` entry names energy
+    # availability, which needs nutrition data nobody has connected — this is
+    # the same concern read off the scale, so the marker is actually watched.
+    fuel = energy_features.underfuelling_watch(store, as_of=as_of)
+    if fuel["flag"] == "watch":
+        out.append(Alert("underfuelling", f"Under-fuelling: {fuel['note']}"))
+
     for marker in protocol_features.monitoring(store, as_of):
         if not marker.get("current_trend"):
             continue
@@ -56,16 +65,20 @@ def check(store: Store, as_of: date | None = None) -> list[Alert]:
 
 
 def send(store: Store, as_of: date | None = None,
-         handle: str | None = None) -> list[Alert]:
-    """Run `check`, text whatever is newly flagged, and update the dedup
+         notifier: Callable[[str], None] | None = None) -> list[Alert]:
+    """Run `check`, deliver whatever is newly flagged, and update the dedup
     state — clearing anything that stopped being true so it can alert again
     if it recurs. Returns only what was actually sent.
 
-    A delivery failure (Automation permission not yet granted, Messages not
-    signed in) is not marked as sent, so the next scheduled run retries it —
+    `notifier` takes the message and gets it to a phone somehow; which channel
+    that is belongs to `notify.send`, not here. With none given, flags are
+    recorded as sent without going anywhere.
+
+    A delivery failure (Automation permission not yet granted, Pushover
+    unreachable) is not marked as sent, so the next scheduled run retries it —
     but it does not stop the rest of this run's flags from being checked.
     """
-    from .notify import NotifyError, send_imessage
+    from .notify import NotifyError
 
     as_of = as_of or date.today()
     active = check(store, as_of=as_of)
@@ -75,9 +88,9 @@ def send(store: Store, as_of: date | None = None,
     for alert in active:
         if store.alerted(alert.key):
             continue
-        if handle:
+        if notifier:
             try:
-                send_imessage(handle, alert.message)
+                notifier(alert.message)
             except NotifyError:
                 continue
         store.mark_alerted(alert.key)

@@ -122,9 +122,19 @@ Ground rules:
   are all present together, the recognised RED-S signature — the right
   response is "these together are worth raising with a doctor", never a
   nutrition tweak you suggest yourself. `flag: "clear"` or `"insufficient
-  data"` mean exactly that; do not editorialise past what the flag says.
-  Rapid weight loss on a GLP-1 agonist alongside heavy training is the same
-  clinical shape and gets the same treatment — escalate, don't manage.
+  data"` mean exactly that; do not editorialise past what the flag says. When
+  its `cycle_leg` is `unavailable` the signature is two legs of three — say so
+  if you report a watch, because it is less specific than the full one.
+
+- UNDER-FUELLING. `underfuelling_watch` is the same clinical shape read from
+  data that exists: an appetite-suppressing compound (or measured low energy
+  availability) alongside weight coming off faster than the plan's ceiling.
+  `flag: "watch"` is an escalation — "these together are worth raising with a
+  doctor" — and its `coarse` field says what it is not, which you should carry
+  across rather than upgrading it to a measurement. Its `caveats` are load-
+  bearing: on exogenous androgens the hormonal screen used in men cannot be
+  read, so do not offer its absence as reassurance. Escalate, don't manage,
+  and never suggest a change to the protocol.
 
 - Say when the data is thin. A baseline built on nine days, a correlation with
   an effective sample of twelve — name the limit rather than writing around it.
@@ -287,6 +297,7 @@ def weekly_payload(store: Store, end: date | None = None) -> dict[str, Any]:
         "phase_training_plan": readiness.phase_training_plan(store, today=end),
         "energy_availability": energy_features.energy_availability(store, as_of=end).as_dict(),
         "red_s_watch": energy_features.red_s_watch(store, as_of=end),
+        "underfuelling_watch": energy_features.underfuelling_watch(store, as_of=end),
         "protocol": protocol_features.summary(store, today=end),
         "check_in_today": checkin_features.subjective_vs_objective(store, end),
         "blood_pressure": checkin_features.blood_pressure(store, as_of=end),

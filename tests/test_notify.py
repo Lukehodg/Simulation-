@@ -63,3 +63,135 @@ def test_not_being_on_macos_is_a_clean_error(monkeypatch):
 
     with pytest.raises(notify.NotifyError, match="macOS"):
         notify.send_imessage("+15551234567", "hi")
+
+
+# -- Pushover ----------------------------------------------------------------
+
+class _Response:
+    def __init__(self, status_code: int, payload: dict | None = None) -> None:
+        self.status_code = status_code
+        self._payload = payload
+
+    def json(self) -> dict:
+        if self._payload is None:
+            raise ValueError("not json")
+        return self._payload
+
+
+def _fake_post(monkeypatch, response, seen: dict):
+    import httpx
+
+    def post(url, data=None, timeout=None):
+        seen["url"], seen["data"] = url, data
+        return response
+
+    monkeypatch.setattr(httpx, "post", post)
+
+
+def test_pushover_posts_the_token_user_and_message(monkeypatch):
+    seen: dict = {}
+    _fake_post(monkeypatch, _Response(200, {"status": 1}), seen)
+
+    notify.send_pushover("user-key", "app-token", "recovery is low today",
+                         title="today brief")
+
+    assert seen["url"] == notify.PUSHOVER_ENDPOINT
+    assert seen["data"]["user"] == "user-key"
+    assert seen["data"]["token"] == "app-token"
+    assert seen["data"]["message"] == "recovery is low today"
+    assert seen["data"]["title"] == "today brief"
+
+
+def test_a_long_brief_fits_inside_pushovers_own_limit(monkeypatch):
+    """Pushover rejects an over-length message outright, so the pointer at the
+    end has to be inside the budget rather than appended past it."""
+    seen: dict = {}
+    _fake_post(monkeypatch, _Response(200, {"status": 1}), seen)
+
+    notify.send_pushover("u", "t", "word " * 1000)
+
+    assert len(seen["data"]["message"]) <= notify.PUSHOVER_MAX_CHARS
+    assert seen["data"]["message"].endswith("full brief in data/briefs/")
+
+
+def test_a_long_title_is_trimmed_rather_than_rejected(monkeypatch):
+    seen: dict = {}
+    _fake_post(monkeypatch, _Response(200, {"status": 1}), seen)
+
+    notify.send_pushover("u", "t", "hi", title="x" * 400)
+
+    assert len(seen["data"]["title"]) == notify.PUSHOVER_MAX_TITLE
+
+
+def test_a_bad_token_explains_which_credential_to_check(monkeypatch):
+    _fake_post(monkeypatch,
+               _Response(400, {"errors": ["application token is invalid"]}), {})
+
+    with pytest.raises(notify.NotifyError) as excinfo:
+        notify.send_pushover("u", "bad", "hi")
+
+    assert "application token is invalid" in str(excinfo.value)
+    assert "PUSHOVER_API_TOKEN" in str(excinfo.value)
+
+
+def test_an_unreachable_pushover_is_a_notify_error_not_a_traceback(monkeypatch):
+    import httpx
+
+    def boom(*a, **k):
+        raise httpx.ConnectError("no route to host")
+
+    monkeypatch.setattr(httpx, "post", boom)
+
+    with pytest.raises(notify.NotifyError, match="could not reach Pushover"):
+        notify.send_pushover("u", "t", "hi")
+
+
+# -- picking a channel -------------------------------------------------------
+
+def _config(tmp_path, **kw):
+    from zoneinfo import ZoneInfo
+
+    from health.config import Config
+
+    return Config(root=tmp_path, timezone=ZoneInfo("Europe/London"),
+                  apple_export_dir=None, **kw)
+
+
+def test_pushover_is_preferred_because_it_works_everywhere(tmp_path):
+    both = _config(tmp_path, notify_imessage="+15551234567",
+                   notify_pushover_user="user-key")
+    assert both.notify_channel == "pushover"
+    assert _config(tmp_path, notify_imessage="+15551234567").notify_channel == "imessage"
+    assert _config(tmp_path).notify_channel is None
+
+
+def test_an_explicit_channel_wins_over_the_inference(tmp_path):
+    forced = _config(tmp_path, notify_imessage="+15551234567",
+                     notify_pushover_user="user-key",
+                     notify_channel_override="imessage")
+    assert forced.notify_channel == "imessage"
+
+
+def test_send_routes_to_the_configured_channel(tmp_path, monkeypatch):
+    seen: dict = {}
+    _fake_post(monkeypatch, _Response(200, {"status": 1}), seen)
+    monkeypatch.setenv("PUSHOVER_API_TOKEN", "app-token")
+
+    channel = notify.send(_config(tmp_path, notify_pushover_user="user-key"),
+                          "the brief", title="today")
+
+    assert channel == "pushover"
+    assert seen["data"]["message"] == "the brief"
+
+
+def test_a_user_key_without_a_token_says_which_half_is_missing(tmp_path, monkeypatch):
+    monkeypatch.delenv("PUSHOVER_API_TOKEN", raising=False)
+
+    with pytest.raises(notify.NotifyError, match="PUSHOVER_API_TOKEN"):
+        notify.send(_config(tmp_path, notify_pushover_user="user-key"), "hi")
+
+
+def test_sending_with_nothing_configured_is_an_error_not_a_silent_no_op(tmp_path):
+    """A brief that quietly went nowhere looks exactly like a quiet morning."""
+    with pytest.raises(notify.NotifyError, match="no delivery channel"):
+        notify.send(_config(tmp_path), "hi")

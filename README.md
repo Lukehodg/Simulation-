@@ -39,9 +39,9 @@ Built and tested:
 | **Check-in** | Daily blood pressure (averaged, trended, escalated) and how you feel — read against the computed state, not just logged |
 | **Experiments** | Pre-registered n-of-1 trials — an exact permutation test over alternating blocks, with its own p-value floor always reported |
 | **Weekly research** | The week's most notable pattern — an experiment result, a trending compound marker, a recovery driver, or a drift — turned into a literature search, on the dashboard and in the weekly brief |
-| **Alerts** | Illness watch, a BP escalation, or a compound marker trending — texted once when it appears, silent while it stays true, `health alert --notify` |
-| **Energy availability** | Screening figure (kcal/kg fat-free mass/day) and a RED-S watch — built and tested now, dormant until nutrition/body-comp data connects |
-| **Brief** | `health brief` — the day (or the week) read back to you in two paragraphs, on a schedule if you want it |
+| **Alerts** | Illness watch, a BP escalation, under-fuelling, or a compound marker trending — sent once when it appears, silent while it stays true, `health alert --notify` |
+| **Energy availability** | Screening figure (kcal/kg fat-free mass/day) and a RED-S watch, dormant until nutrition/body-comp data connects; an under-fuelling watch that reads the same question off the scale, the load and your protocol today |
+| **Brief** | `health brief` — the day (or the week) read back to you in two paragraphs, on a schedule if you want it, pushed to your phone every morning if you want that |
 | **Agent tools** | 38 MCP tools — the surface Claude actually talks to |
 | **Interface** | A local page on 127.0.0.1, served from the same database — readiness, protocol, six-week drift, sleep architecture, check-in, experiment verdicts, load-ratio and sleep-debt charts, this week's research |
 | **Bloods page** | Drop a report in, see what is flagged, ask Claude to read it |
@@ -451,41 +451,67 @@ test failing — read it as "worth more blocks" rather than "no effect".
 
 ## Alerts
 
-Illness watch, a BP escalation, and a compound-monitoring marker trending are
-all computed already; none of them reach you unless you happen to open the
-brief or the dashboard that day. `health alert` closes that gap — never a
-daily digest, only what's actually flagged:
+Illness watch, a BP escalation, under-fuelling, and a compound-monitoring
+marker trending are all computed already; none of them reach you unless you
+happen to open the brief or the dashboard that day. `health alert` closes that
+gap — never a daily digest, only what's actually flagged:
 
 ```sh
 health alert            # prints current flags, and which are new vs. already sent
-health alert --notify   # texts the new ones over iMessage, and remembers them
+health alert --notify   # sends the new ones to your phone, and remembers them
 ```
 
-Each flag texts once, stays silent on later checks while it's still true, and
+Each flag sends once, stays silent on later checks while it's still true, and
 alerts again only if it clears and then recurs — a condition that takes a
-week to resolve sends one message, not one per scheduled check.
-`health schedule --alert` runs it 15 minutes after each sync (07:30 and
-19:30 by default), and needs `HEALTH_NOTIFY_IMESSAGE` set — an alert job that
-never texts you is pointless, so it refuses to install without it.
+week to resolve sends one message, not one per scheduled check. A delivery that
+fails is not recorded as sent, so the next scheduled run retries it rather than
+swallowing it. `health schedule --alert` runs it 15 minutes after each sync
+(07:30 and 19:30 by default) and needs a delivery channel configured — an alert
+job that can never reach you is pointless, so it refuses to install without
+one.
 
 ## Energy availability
 
 `energy_availability` (kcal/kg fat-free mass/day, Loucks & Thuma's threshold
 for when reproductive/metabolic function starts to disrupt) and `red_s_watch`
 — sustained low energy availability, an elevated training load, and cycle
-disruption, together — are built and tested now, and report honestly that
-they're `available: false` today, because MyFitnessPal and Apple Health
-nutrition aren't connected yet:
+disruption, together — report honestly that they're `available: false` today,
+because MyFitnessPal and Apple Health nutrition aren't connected yet. The
+moment that data starts arriving they activate with no further code.
 
 ```sh
 health energy
 ```
 
-The moment nutrition and body-composition data start arriving, this
-activates with no further code — `red_s_watch`'s `flag: "watch"` is the
-concrete case from this project's original design: when the three signals
-line up together, the answer is "worth a conversation with a doctor," never a
-nutrition tweak suggested here.
+Two things make them answerable rather than permanently dormant.
+
+**The cycle leg is reported, not required.** With no period logs it reads
+`unavailable` — which is the truth whether there is no cycle to track or simply
+no log of one — and the check runs on the two legs that remain, saying plainly
+that two of three is less specific than the full signature. It used to return
+`insufficient data` for ever to anyone without cycle logs: a check that could
+not fire, standing in for one that could.
+
+**`underfuelling_watch` asks the same question from data that exists.** A
+mechanism for intake being short — an appetite-suppressing compound is active,
+or measured energy availability really is low — plus the consequence on the
+scale: weight coming off faster than the ceiling of the band `health plan`
+prescribes against. Either alone is ordinary; a GLP-1 is supposed to suppress
+appetite and one fast fortnight happens to everyone. Together they are what
+`compounds.py` calls "rapid weight loss alongside high training load", and an
+elevated load or a week of short protein is named in the output rather than
+required to fire. It exists because a GLP-1's `monitor` entry points at
+`energy_availability`, and a marker nobody can read is not being monitored. It
+is a coarser instrument than real energy availability and says so in its own
+output.
+
+It also carries the caveats the compounds impose on it — and one of those
+matters more than it looks: **on exogenous androgens the hormonal screen
+normally used in men (low testosterone, suppressed LH) cannot be read at all**,
+so not seeing it is not reassurance. A watch on either check is "worth a
+conversation with a doctor," never a nutrition tweak suggested here and never a
+reason to change a protocol. It reaches [alerts](#alerts), so it can actually
+interrupt you.
 
 ## Blood tests
 
@@ -601,38 +627,38 @@ health backup --to ~/Dropbox/health    # archive raw/
 ```
 
 Everything here assumes data keeps arriving, which it does not unless
-something runs `health sync`. `schedule --install` writes a launchd agent
-pointed at your own interpreter and project — launchd has almost no PATH, so a
-bare `health` would not resolve — and sends output to `data/logs/sync.log`, so
-a sync that has been quietly failing for a fortnight is visible rather than
-assumed. A scheduled time that passes while the lid is shut runs on wake
-instead of being skipped. On anything that is not macOS it prints the cron line
-instead.
+something runs `health sync`. `schedule --install` writes a real scheduled job
+pointed at your own interpreter and project — launchd and Task Scheduler both
+have almost no PATH, so a bare `health` would not resolve — and sends output to
+`data/logs/sync.log`, so a sync that has been quietly failing for a fortnight
+is visible rather than assumed. A scheduled time that passes while the lid is
+shut runs on wake instead of being skipped.
 
-`--brief` adds a second agent that runs `health brief --save` after the morning
-sync, logging to `data/logs/brief.log`. It is only installed if
+**A launchd agent on macOS, a Task Scheduler task on Windows**, and the cron
+line printed for anything else. The Windows task goes in through `schtasks
+/Create /XML` rather than the command-line flags, because the flags cannot
+express the two things that matter here: more than one time of day in a single
+task, and `StartWhenAvailable` — the equivalent of launchd catching up a job
+the closed lid missed. Tasks land under `\Health\` so `schtasks /Query` stays
+readable, and the timezone comes from `.env` in the project rather than from
+the scheduler's environment.
+
+`--brief` adds a second job that runs `health brief --save --html` after the
+morning sync, logging to `data/logs/brief.log`. It is only installed if
 `ANTHROPIC_API_KEY` is set — the brief has nothing to do without it —
-and `health schedule --no-brief` removes it.
+and `health schedule --no-brief` removes it. `--brief --notify` is the one that
+puts the morning read on your phone; see [the brief](#the-brief) for the two
+channels.
 
-`--alert` adds a third agent — see [Alerts](#alerts) above — that runs
+`--alert` adds a third job — see [Alerts](#alerts) above — that runs
 `health alert --notify` 15 minutes after each sync, logging to
-`data/logs/alert.log`. It is only installed if `HEALTH_NOTIFY_IMESSAGE` is
-set, since an alert job that can never text you is pointless.
+`data/logs/alert.log`. It is only installed if a delivery channel is
+configured, since an alert job that can never reach you is pointless.
 
 Two syncs cannot run at once: DuckDB gives the file to a single writer, so a
 scheduled run that collides with a manual one now stops with a sentence rather
 than a lock error that looks like a bug. The lock is `flock` on POSIX and
 `msvcrt.locking` on Windows; the rest of the CLI runs on both.
-
-**On Windows**, `schedule --install` prints the cron line rather than writing a
-launchd agent, so pick a scheduler yourself. Either Task Scheduler pointed at
-`.venv\Scripts\health.exe sync`, or — if you already talk to this project
-through Claude — a Claude scheduled task running the morning sequence:
-
-```
-.venv\Scripts\health.exe sync
-.venv\Scripts\health.exe plan --push
-```
 
 **Backups archive `raw/`, not the database.** The database is disposable —
 `health replay` rebuilds every table from raw payloads. What cannot be rebuilt
@@ -771,7 +797,7 @@ health brief                     # the day, in two paragraphs
 health brief --week              # the week, plus its most interesting pattern
 health brief --ask "why has training felt hard this week?"
 health brief --no-send           # print exactly what would be sent, and stop
-health brief --notify            # also text it to yourself over iMessage
+health brief --notify            # also send it to your phone
 ```
 
 Where the rest of the system hands you numbers, this hands you a reading of
@@ -784,12 +810,32 @@ exact payload first, the same contract as the bloods page. Needs
 `ANTHROPIC_API_KEY`. `health schedule --brief` runs it every morning and drops
 the result in `data/briefs/`.
 
-`--notify` also texts it to you. It sends over iMessage via `osascript` — a
-message to yourself — rather than a push service, so the brief's numbers travel
-the same iMessage/iCloud path that already carries your Health data, with no
-third-party account. Set `HEALTH_NOTIFY_IMESSAGE` to your own number or Apple
-ID; the first run triggers a one-time macOS Automation permission prompt.
-`health schedule --brief --notify` bakes it into the morning job.
+`--notify` also sends it to your phone, over one of two channels. `health
+schedule --brief --notify` bakes that into the morning job, which is the whole
+point: the brief lands as a notification before you are up, without you running
+anything.
+
+| | **Pushover** | **iMessage** |
+|---|---|---|
+| Runs on | anything | macOS only |
+| Set | `HEALTH_PUSHOVER_USER` + the `PUSHOVER_API_TOKEN` secret | `HEALTH_NOTIFY_IMESSAGE` (your own number or Apple ID) |
+| Costs | a one-off for the phone app | nothing |
+| Privacy | the brief's text passes through Pushover's servers | a message to yourself, on the same iCloud path your Health data already takes |
+| Setup | user key from pushover.net, token from an app you create at pushover.net/apps | a one-time macOS Automation prompt on first run |
+
+With both configured Pushover wins, because it is the one that can actually
+deliver on the machine where both are set; `HEALTH_NOTIFY_CHANNEL=imessage`
+overrides that. With neither, `--notify` stops with a sentence saying so rather
+than succeeding silently — a brief that went nowhere looks exactly like a quiet
+morning.
+
+Pushover is the only third party in this project besides Anthropic, and it is
+worth being clear about what that means: the brief names compounds, weights and
+markers, and on that channel the text passes through servers you do not own.
+iMessage does not have that property, which is why it is still here and still
+the default on a Mac. The message is clipped to the channel's own limit
+(1,024 characters on Pushover, 1,400 on iMessage) with a pointer to the full
+copy in `data/briefs/`.
 
 The signals it is built on are also callable directly, on the CLI and through
 the agent:

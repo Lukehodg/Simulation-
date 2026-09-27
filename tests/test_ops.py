@@ -52,6 +52,47 @@ def test_the_cron_fallback_says_the_same_thing(config):
     assert "sync" in line and str(config.root) in line
 
 
+def test_the_windows_task_carries_every_time_in_one_definition(config):
+    """schtasks' flags take one /ST, which is why this goes in through XML —
+    the morning and evening sync are one task, as they are on launchd."""
+    xml = schedule.task_xml(config, schedule.plan(config, "07:15,19:15"))
+
+    assert xml.count("<CalendarTrigger>") == 2
+    assert "T07:15:00" in xml and "T19:15:00" in xml
+    assert "<ScheduleByDay><DaysInterval>1</DaysInterval></ScheduleByDay>" in xml
+
+
+def test_the_windows_task_runs_a_missed_job_on_wake(config):
+    """launchd's behaviour by default, and the reason for XML over flags: a
+    07:15 job on a laptop that was shut has to run when it opens."""
+    xml = schedule.task_xml(config, schedule.plan(config, "07:15"))
+
+    assert "<StartWhenAvailable>true</StartWhenAvailable>" in xml
+    assert "<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>" in xml
+
+
+def test_the_windows_command_quotes_paths_and_keeps_the_log(config):
+    plan = schedule.plan(config, "07:45", job="brief", notify=True)
+    command = schedule.task_command(config, plan)
+
+    assert command.startswith('/c ""')
+    assert f'"{config.root}"' in command
+    assert "brief --save --html --notify" in command
+    assert f'>> "{plan.log}" 2>&1' in command
+
+
+def test_the_windows_task_xml_is_well_formed(config):
+    """A path with an ampersand in it would otherwise produce XML that
+    schtasks rejects with a parse error that explains nothing."""
+    from xml.etree import ElementTree
+
+    xml = schedule.task_xml(config, schedule.plan(config, "07:15,19:15"))
+    root = ElementTree.fromstring(xml)
+
+    assert root.tag.endswith("Task")
+    assert schedule.task_name(schedule.plan(config)) == "\\Health\\sync"
+
+
 def test_status_reports_nothing_when_nothing_is_scheduled(config, monkeypatch, tmp_path):
     monkeypatch.setattr(schedule, "plan",
                         lambda cfg, times=None, job="sync": schedule.Schedule(

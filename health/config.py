@@ -34,6 +34,11 @@ class Config:
     apple_export_dir: Path | None
     #: iMessage handle (your own number or Apple ID) the brief texts itself to.
     notify_imessage: str | None = None
+    #: Pushover user key. The API token is a secret and comes from
+    #: `secrets.get_secret`, not from here — this is only which devices to ring.
+    notify_pushover_user: str | None = None
+    #: "pushover" | "imessage", when both are configured and you want to say.
+    notify_channel_override: str | None = None
 
     @property
     def data_dir(self) -> Path:
@@ -51,6 +56,23 @@ class Config:
     def config_dir(self) -> Path:
         """Credentials and tokens — outside the project, never in git."""
         return Path(os.environ.get("HEALTH_CONFIG_DIR", "~/.config/health")).expanduser()
+
+    @property
+    def notify_channel(self) -> str | None:
+        """Which channel `notify.send` will use, or None if none is set up.
+
+        An explicit `HEALTH_NOTIFY_CHANNEL` wins. Otherwise Pushover goes first
+        because it works everywhere, and iMessage only runs on macOS — so on
+        the machine where both are configured, the one that can actually
+        deliver is the default.
+        """
+        if self.notify_channel_override:
+            return self.notify_channel_override
+        if self.notify_pushover_user:
+            return "pushover"
+        if self.notify_imessage:
+            return "imessage"
+        return None
 
     def ensure_dirs(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -75,5 +97,12 @@ def load_config(root: Path | None = None) -> Config:
     raw_export_dir = os.environ.get("HEALTH_APPLE_EXPORT_DIR")
     export_dir = Path(raw_export_dir).expanduser() if raw_export_dir else None
 
+    channel = (os.environ.get("HEALTH_NOTIFY_CHANNEL") or "").strip().lower() or None
+    if channel and channel not in ("pushover", "imessage"):
+        raise SystemExit(f"HEALTH_NOTIFY_CHANNEL={channel!r} is not a channel — "
+                         f"use 'pushover' or 'imessage'")
+
     return Config(root=root, timezone=tz, apple_export_dir=export_dir,
-                  notify_imessage=os.environ.get("HEALTH_NOTIFY_IMESSAGE") or None)
+                  notify_imessage=os.environ.get("HEALTH_NOTIFY_IMESSAGE") or None,
+                  notify_pushover_user=os.environ.get("HEALTH_PUSHOVER_USER") or None,
+                  notify_channel_override=channel)

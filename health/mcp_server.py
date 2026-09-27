@@ -391,12 +391,15 @@ def weekly_research_pattern(limit: int = 4) -> dict[str, Any]:
          "url": p.url, "abstract": (p.abstract or "")[:1200]} for p in papers]}
 
 
-@server.tool(description="Energy availability (kcal/kg fat-free mass/day) and "
-                         "the RED-S watch — a screening signal, not a "
-                         "diagnosis. Reports `available: false` honestly when "
-                         "nutrition/body-composition data is not connected, "
-                         "which is the case until MyFitnessPal or Apple "
-                         "Health nutrition is linked.")
+@server.tool(description="Energy availability (kcal/kg fat-free mass/day), the "
+                         "RED-S watch, and the under-fuelling watch — "
+                         "screening signals, not diagnoses. The first two "
+                         "report honestly that they are unavailable until "
+                         "MyFitnessPal or Apple Health nutrition is linked; "
+                         "`underfuelling_watch` asks the same question from the "
+                         "scale, the training load and the active protocol, so "
+                         "it answers today. Escalate a watch to a clinician; "
+                         "never suggest a protocol change.")
 @guarded
 def energy_availability() -> dict[str, Any]:
     from .features import energy as energy_features
@@ -404,7 +407,9 @@ def energy_availability() -> dict[str, Any]:
     with _store() as store:
         ea = energy_features.energy_availability(store)
         watch = energy_features.red_s_watch(store)
-    return {"energy_availability": ea.as_dict(), "red_s_watch": watch}
+        fuel = energy_features.underfuelling_watch(store)
+    return {"energy_availability": ea.as_dict(), "red_s_watch": watch,
+            "underfuelling_watch": fuel}
 
 
 @server.tool(description="Illness watch, a blood-pressure escalation, or a "

@@ -5,7 +5,6 @@ from datetime import date, datetime, time, timedelta, timezone
 import pytest
 
 from health import alerts
-from health import notify
 from health.features import protocol as protocol_features
 from health.models import Observation, ProtocolEvent, Records
 
@@ -86,16 +85,44 @@ def test_a_trending_monitoring_marker_becomes_a_flag(store):
 
 # -- send() -------------------------------------------------------------
 
-def test_send_texts_a_new_flag_once_and_stays_quiet_while_it_persists(store, monkeypatch):
+def test_under_fuelling_becomes_a_flag(store):
+    """`energy.py`'s reachable half. A GLP-1's `monitor` entry names energy
+    availability, which needs nutrition data nobody has connected — so the
+    marker only gets watched if the scale can stand in for it."""
+    _obs(store, "body_mass", [92.0 - i * 0.25 for i in range(21)], source="apple_health")
+    store.load(Records(protocol_events=[
+        ProtocolEvent(source="protocol", local_date=START - timedelta(weeks=6),
+                      event="start", compound="retatrutide", dose=2, unit="mg",
+                      freq="weekly")]))
+    protocol_features.rebuild(store)
+
+    flags = {a.key: a for a in alerts.check(store, as_of=START + timedelta(days=20))}
+
+    assert "underfuelling" in flags
+    assert "retatrutide" in flags["underfuelling"].message
+
+
+def test_a_steady_scale_on_a_glp1_does_not_alert(store):
+    _obs(store, "body_mass", [92.0 - i * 0.05 for i in range(21)], source="apple_health")
+    store.load(Records(protocol_events=[
+        ProtocolEvent(source="protocol", local_date=START - timedelta(weeks=6),
+                      event="start", compound="retatrutide", dose=2, unit="mg",
+                      freq="weekly")]))
+    protocol_features.rebuild(store)
+
+    keys = {a.key for a in alerts.check(store, as_of=START + timedelta(days=20))}
+
+    assert "underfuelling" not in keys
+
+
+def test_send_delivers_a_new_flag_once_and_stays_quiet_while_it_persists(store):
     sent = []
-    monkeypatch.setattr(notify, "send_imessage",
-                        lambda handle, text: sent.append((handle, text)))
     for i in range(7):
         _bp(store, START + timedelta(days=i), 144, 92)
     day = START + timedelta(days=6)
 
-    first = alerts.send(store, as_of=day, handle="+15551234567")
-    second = alerts.send(store, as_of=day, handle="+15551234567")
+    first = alerts.send(store, as_of=day, notifier=sent.append)
+    second = alerts.send(store, as_of=day, notifier=sent.append)
 
     assert len(first) == 1
     assert first[0].key == "bp_escalate"
@@ -103,17 +130,35 @@ def test_send_texts_a_new_flag_once_and_stays_quiet_while_it_persists(store, mon
     assert len(sent) == 1                       # only texted once
 
 
-def test_send_alerts_again_after_a_flag_clears_and_recurs(store, monkeypatch):
-    monkeypatch.setattr(notify, "send_imessage", lambda handle, text: None)
+def test_a_delivery_failure_is_retried_rather_than_marked_sent(store):
+    from health.notify import NotifyError
+
+    def unreachable(_text: str) -> None:
+        raise NotifyError("Pushover is down")
+
     for i in range(7):
         _bp(store, START + timedelta(days=i), 144, 92)
     day = START + timedelta(days=6)
-    alerts.send(store, as_of=day, handle="+15551234567")
+
+    assert alerts.send(store, as_of=day, notifier=unreachable) == []
+    assert not store.alerted("bp_escalate")
+
+    landed = []
+    assert len(alerts.send(store, as_of=day, notifier=landed.append)) == 1
+    assert landed
+
+
+def test_send_alerts_again_after_a_flag_clears_and_recurs(store):
+    quiet = lambda _text: None                              # noqa: E731
+    for i in range(7):
+        _bp(store, START + timedelta(days=i), 144, 92)
+    day = START + timedelta(days=6)
+    alerts.send(store, as_of=day, notifier=quiet)
     assert store.alerted("bp_escalate")
 
     # the condition clears: a quiet week with no BP logged
     clear_day = day + timedelta(days=30)
-    cleared = alerts.send(store, as_of=clear_day, handle="+15551234567")
+    cleared = alerts.send(store, as_of=clear_day, notifier=quiet)
     assert cleared == []
     assert not store.alerted("bp_escalate")
 
@@ -121,7 +166,7 @@ def test_send_alerts_again_after_a_flag_clears_and_recurs(store, monkeypatch):
     for i in range(7):
         _bp(store, clear_day + timedelta(days=1 + i), 144, 92)
     recur_day = clear_day + timedelta(days=7)
-    again = alerts.send(store, as_of=recur_day, handle="+15551234567")
+    again = alerts.send(store, as_of=recur_day, notifier=quiet)
 
     assert len(again) == 1
     assert again[0].key == "bp_escalate"

@@ -1,19 +1,23 @@
 """Making the sync — and, optionally, the brief — run without you.
 
 Everything in this project assumes data keeps arriving. It does not, unless
-something runs `health sync` — so this writes a launchd agent on macOS (and
-prints the cron equivalent elsewhere), pointed at your own interpreter and
-project directory.
+something runs `health sync` — so this installs a real scheduled job, pointed
+at your own interpreter and project directory: a launchd agent on macOS, a
+Task Scheduler task on Windows, and the cron line printed for anything else.
 
 Two properties that matter on a laptop rather than a server: a job whose time
 passes while the machine is asleep runs when it wakes, rather than being
-skipped until tomorrow; and output goes to a log inside the project, so a sync
+skipped until tomorrow (launchd does this by itself; the Windows task asks for
+it with `/Z /V1`-era `StartWhenAvailable`, set through the XML that `schtasks
+/Create /XML` reads); and output goes to a log inside the project, so a sync
 that has been quietly failing for a fortnight is visible rather than assumed.
 
-There are two jobs. `sync` is the one that must run. `brief` is opt-in: it runs
-`health brief --save` a little after the morning sync and drops the day's
-reading in `data/briefs/`, and it is only installed when an Anthropic key is
-available for it to use.
+There are three jobs. `sync` is the one that must run. `brief` is opt-in: it
+runs `health brief --save --html` a little after the morning sync, drops the
+day's reading in `data/briefs/`, and with `--notify` puts it on your phone —
+it is only installed when an Anthropic key is available for it to use. `alert`
+is the quiet one: it speaks only when something is actually flagged, so it is
+pointless without a delivery channel and is not installed without one.
 """
 
 from __future__ import annotations
@@ -118,7 +122,7 @@ def plist(config: Config, schedule: Schedule) -> dict:
 
 
 def cron_line(config: Config, schedule: Schedule) -> str:
-    """The equivalent for anything that is not macOS."""
+    """The equivalent for anything that is neither macOS nor Windows."""
     minutes = ",".join(sorted({t.split(":")[1].lstrip("0") or "0" for t in schedule.times}))
     hours = ",".join(sorted({t.split(":")[0].lstrip("0") or "0" for t in schedule.times},
                             key=int))
@@ -127,10 +131,122 @@ def cron_line(config: Config, schedule: Schedule) -> str:
             f">> {schedule.log} 2>&1")
 
 
+# -- Windows -----------------------------------------------------------------
+#
+# Task Scheduler, through `schtasks /Create /XML`. The XML route rather than
+# the flag route because the flags cannot express two things this needs: more
+# than one time of day in a single task, and StartWhenAvailable — the
+# equivalent of launchd running a job on wake instead of skipping the day.
+#
+# Nothing sets HEALTH_TIMEZONE here the way the launchd agent does. It does not
+# need to: `load_config` reads `.env` from the working directory, which is the
+# project root, so the timezone travels with the project rather than with the
+# scheduler.
+
+#: Any date in the past works as an anchor — the daily recurrence is what
+#: matters, and a fixed one keeps the generated XML stable between runs.
+_ANCHOR_DAY = "2020-01-01"
+
+
+def task_name(schedule: Schedule) -> str:
+    """The Task Scheduler path for a job. launchd labels are dotted; Windows
+    wants a path, and one folder keeps `schtasks /Query` readable."""
+    return "\\Health\\" + schedule.label.rsplit(".", 1)[-1]
+
+
+def task_command(config: Config, schedule: Schedule) -> str:
+    """The `cmd.exe` arguments that run the job and append to its log.
+
+    `cmd /c "..."` strips the outermost pair of quotes, which is what lets the
+    executable and the log path keep theirs — both routinely live under a
+    profile directory with a space in it.
+    """
+    program = " ".join(schedule.program)
+    return (f'/c ""{executable()}" --root "{config.root}" {program} '
+            f'>> "{schedule.log}" 2>&1"')
+
+
+def task_xml(config: Config, schedule: Schedule) -> str:
+    """The task definition, as a string so it can be tested without writing
+    anything or calling schtasks."""
+    from xml.sax.saxutils import escape
+
+    triggers = "\n".join(
+        f"""    <CalendarTrigger>
+      <StartBoundary>{_ANCHOR_DAY}T{time}:00</StartBoundary>
+      <Enabled>true</Enabled>
+      <ScheduleByDay><DaysInterval>1</DaysInterval></ScheduleByDay>
+    </CalendarTrigger>""" for time in schedule.times)
+
+    return f"""<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>health {escape(' '.join(schedule.program))}</Description>
+  </RegistrationInfo>
+  <Triggers>
+{triggers}
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT1H</ExecutionTimeLimit>
+    <Priority>7</Priority>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>cmd.exe</Command>
+      <Arguments>{escape(task_command(config, schedule))}</Arguments>
+      <WorkingDirectory>{escape(str(config.root))}</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>
+"""
+
+
+def _schtasks(*args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["schtasks", *args], capture_output=True, text=True)
+
+
+def _install_windows(config: Config, schedule: Schedule) -> str:
+    import tempfile
+
+    name = task_name(schedule)
+    # schtasks reads the definition as UTF-16; handing it UTF-8 fails with a
+    # parse error that says nothing useful about why.
+    with tempfile.NamedTemporaryFile("w", suffix=".xml", delete=False,
+                                     encoding="utf-16") as handle:
+        handle.write(task_xml(config, schedule))
+        path = handle.name
+    try:
+        result = _schtasks("/Create", "/TN", name, "/XML", path, "/F")
+    finally:
+        Path(path).unlink(missing_ok=True)
+
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip()
+        return f"schtasks refused to create {name}: {detail}"
+    return (f"created {name} · {' '.join(schedule.program)} at "
+            f"{', '.join(schedule.times)} daily")
+
+
 def _load(schedule: Schedule, config: Config) -> str:
     schedule.log.parent.mkdir(parents=True, exist_ok=True)
+    if platform.system() == "Windows":
+        return _install_windows(config, schedule)
     if platform.system() != "Darwin":
-        return ("not macOS — add this to your crontab instead:\n  "
+        return ("neither macOS nor Windows — add this to your crontab instead:\n  "
                 + cron_line(config, schedule))
 
     schedule.plist_path.parent.mkdir(parents=True, exist_ok=True)
@@ -153,18 +269,27 @@ def install(config: Config, times: str | None = None, job: str = "sync",
         return schedule, ("ANTHROPIC_API_KEY is not set, and the brief needs it "
                           "to write anything — skipped. Add the key, then "
                           "`health schedule --brief`.")
-    if job == "brief" and notify and not config.notify_imessage:
-        return schedule, ("--notify needs HEALTH_NOTIFY_IMESSAGE set (your own "
-                          "number or Apple ID, in .env) — not installed.")
-    if job == "alert" and not config.notify_imessage:
-        return schedule, ("HEALTH_NOTIFY_IMESSAGE is not set, and an alert job "
-                          "that never texts you is pointless — skipped. Add it, "
-                          "then `health schedule --alert`.")
+    if job == "brief" and notify and not config.notify_channel:
+        return schedule, ("--notify needs a delivery channel: HEALTH_PUSHOVER_USER "
+                          "plus a PUSHOVER_API_TOKEN secret, or "
+                          "HEALTH_NOTIFY_IMESSAGE on macOS — not installed.")
+    if job == "alert" and not config.notify_channel:
+        return schedule, ("no delivery channel is configured, and an alert job "
+                          "that can never reach you is pointless — skipped. Set "
+                          "HEALTH_PUSHOVER_USER (or HEALTH_NOTIFY_IMESSAGE on "
+                          "macOS), then `health schedule --alert`.")
     return schedule, _load(schedule, config)
 
 
 def remove(config: Config, job: str = "sync") -> str:
     schedule = plan(config, job=job)
+    if platform.system() == "Windows":
+        name = task_name(schedule)
+        result = _schtasks("/Delete", "/TN", name, "/F")
+        if result.returncode != 0:
+            return f"nothing scheduled for {job}"
+        return f"removed {name}"
+
     if not schedule.plist_path.exists():
         return f"nothing scheduled for {job}"
     if platform.system() == "Darwin":
@@ -174,22 +299,47 @@ def remove(config: Config, job: str = "sync") -> str:
     return f"removed {schedule.plist_path}"
 
 
-def status(config: Config, job: str = "sync") -> dict:
-    schedule = plan(config, job=job)
-    installed = schedule.plist_path.exists()
-    loaded = False
-    if installed and platform.system() == "Darwin":
-        result = subprocess.run(["launchctl", "list"], capture_output=True, text=True)
-        loaded = schedule.label in result.stdout
+def _windows_status(schedule: Schedule) -> tuple[bool, bool, tuple[str, ...]]:
+    """(installed, enabled, times) from Task Scheduler's own copy of the task."""
+    result = _schtasks("/Query", "/TN", task_name(schedule), "/XML", "ONE")
+    if result.returncode != 0:
+        return False, False, ()
 
     times: tuple[str, ...] = ()
-    if installed:
-        try:
-            data = plistlib.loads(schedule.plist_path.read_bytes())
-            times = tuple(f"{i['Hour']:02d}:{i['Minute']:02d}"
-                          for i in data.get("StartCalendarInterval", []))
-        except Exception:  # noqa: BLE001 - a malformed plist is reportable, not fatal
-            times = ()
+    enabled = "<Enabled>false</Enabled>" not in result.stdout
+    try:
+        import re
+        times = tuple(sorted(
+            f"{h}:{m}" for h, m in
+            re.findall(r"<StartBoundary>[^<]*T(\d{2}):(\d{2})", result.stdout)))
+    except Exception:  # noqa: BLE001 - a task we cannot parse still exists
+        times = ()
+    return True, enabled, times
+
+
+def status(config: Config, job: str = "sync") -> dict:
+    schedule = plan(config, job=job)
+    where = str(schedule.plist_path)
+
+    if platform.system() == "Windows":
+        installed, loaded, times = _windows_status(schedule)
+        where = task_name(schedule)
+    else:
+        installed = schedule.plist_path.exists()
+        loaded = False
+        if installed and platform.system() == "Darwin":
+            result = subprocess.run(["launchctl", "list"], capture_output=True,
+                                    text=True)
+            loaded = schedule.label in result.stdout
+
+        times = ()
+        if installed:
+            try:
+                data = plistlib.loads(schedule.plist_path.read_bytes())
+                times = tuple(f"{i['Hour']:02d}:{i['Minute']:02d}"
+                              for i in data.get("StartCalendarInterval", []))
+            except Exception:  # noqa: BLE001 - a malformed plist is reportable, not fatal
+                times = ()
 
     tail = ""
     if schedule.log.exists():
@@ -197,5 +347,4 @@ def status(config: Config, job: str = "sync") -> dict:
         tail = "\n".join(lines[-8:])
 
     return {"job": job, "installed": installed, "loaded": loaded, "times": times,
-            "plist": str(schedule.plist_path), "log": str(schedule.log),
-            "recent": tail}
+            "plist": where, "log": str(schedule.log), "recent": tail}

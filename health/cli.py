@@ -558,7 +558,11 @@ def cmd_schedule(args, config) -> int:
               "  health schedule --install            # 07:15 and 19:15 daily\n"
               "  health schedule --install --times 08:00\n"
               "  health schedule --brief              # also write a brief at 07:45\n"
-              "                                       # (needs ANTHROPIC_API_KEY)")
+              "                                       # (needs ANTHROPIC_API_KEY)\n"
+              "  health schedule --brief --notify     # ...and send it to your phone\n"
+              "  health schedule --alert              # only speaks when flagged\n"
+              "\nlaunchd on macOS, Task Scheduler on Windows, a printed cron "
+              "line elsewhere.")
     return 0
 
 
@@ -637,20 +641,28 @@ def cmd_sql(args, config) -> int:
     return 0
 
 
+#: One sentence, in one place, for every command that can deliver to a phone.
+_NO_CHANNEL = ("--notify needs a delivery channel. Either HEALTH_PUSHOVER_USER "
+               "plus a PUSHOVER_API_TOKEN secret (works anywhere), or "
+               "HEALTH_NOTIFY_IMESSAGE on macOS. Both go in .env.")
+
+
 def cmd_alert(args, config) -> int:
     from . import alerts as alerts_mod
 
     if args.notify:
-        if not config.notify_imessage:
-            raise SystemExit("--notify needs HEALTH_NOTIFY_IMESSAGE set to your "
-                             "own number or Apple ID (in .env).")
+        from . import notify as notify_mod
+
+        if not config.notify_channel:
+            raise SystemExit(_NO_CHANNEL)
         with _store(config) as store:
-            sent = alerts_mod.send(store, handle=config.notify_imessage)
+            sent = alerts_mod.send(store, notifier=lambda text: notify_mod.send(
+                config, text, title="Health alert"))
         if not sent:
             print("nothing new to alert on.")
             return 0
         for alert in sent:
-            print(f"texted: {alert.message}")
+            print(f"sent via {config.notify_channel}: {alert.message}")
         return 0
 
     with _store(config, read_only=True) as store:
@@ -672,9 +684,11 @@ def cmd_energy(args, config) -> int:
     with _store(config, read_only=True) as store:
         ea = energy_features.energy_availability(store, days=args.days)
         watch = energy_features.red_s_watch(store)
+        fuel = energy_features.underfuelling_watch(store)
 
     if args.json:
-        print(_json.dumps({"energy_availability": ea.as_dict(), "red_s_watch": watch},
+        print(_json.dumps({"energy_availability": ea.as_dict(),
+                           "red_s_watch": watch, "underfuelling_watch": fuel},
                           indent=2, default=str))
         return 0
 
@@ -687,6 +701,17 @@ def cmd_energy(args, config) -> int:
          + (f" — {watch['note']}" if watch.get("note") else ""))
     if watch.get("missing"):
         print("  missing: " + ", ".join(watch["missing"]))
+    if watch.get("cycle_leg") == "unavailable":
+        print("  cycle leg: not tracked, so this runs on two legs of three")
+
+    # The one that answers on today's data, so it goes second but is usually
+    # the only one with a verdict behind it.
+    print(f"\nunder-fuelling watch: {fuel['flag']}"
+         + (f" — {fuel['note']}" if fuel.get("note") else ""))
+    if fuel.get("missing"):
+        print("  missing: " + ", ".join(fuel["missing"]))
+    for caveat in fuel.get("caveats", []):
+        print(f"  {caveat}")
     return 0
 
 
@@ -705,9 +730,8 @@ def cmd_brief(args, config) -> int:
                   "the machine.", file=sys.stderr)
             return 0
         get_secret("ANTHROPIC_API_KEY", config.config_dir)  # fail early, and clearly
-        if args.notify and not config.notify_imessage:
-            raise SystemExit("--notify needs HEALTH_NOTIFY_IMESSAGE set to your "
-                             "own number or Apple ID (in .env).")
+        if args.notify and not config.notify_channel:
+            raise SystemExit(_NO_CHANNEL)
         try:
             result = brief_mod.generate(store, config, span=span,
                                         question=args.ask)
@@ -738,15 +762,15 @@ def cmd_brief(args, config) -> int:
         if sys.platform == "darwin" and sys.stdout.isatty():
             import subprocess
             subprocess.run(["open", str(page)], check=False)
-    if args.notify and config.notify_imessage and result.usage:
-        from .notify import NotifyError, send_imessage
+    if args.notify and config.notify_channel and result.usage:
+        from . import notify as notify_mod
 
-        header = f"{span} brief · {date.today()}\n\n"
         try:
-            send_imessage(config.notify_imessage, header + result.text)
-            print(f"texted to {config.notify_imessage}", file=sys.stderr)
-        except NotifyError as exc:
-            print(f"iMessage delivery failed: {exc}", file=sys.stderr)
+            channel = notify_mod.send(config, result.text,
+                                      title=f"{span} brief · {date.today()}")
+            print(f"sent over {channel}", file=sys.stderr)
+        except notify_mod.NotifyError as exc:
+            print(f"delivery failed: {exc}", file=sys.stderr)
     if result.usage:
         print(f"\n{result.model} · {result.usage['input']}+{result.usage['output']} "
               f"tokens · computed locally, only the labelled figures were sent",
