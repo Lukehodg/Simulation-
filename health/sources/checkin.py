@@ -53,7 +53,16 @@ class CheckInSource(Source):
         weight = entry.get("weight_kg")
         if weight is not None and not (30 <= float(weight) <= 300):
             raise ValueError(f"{weight!r} kg doesn't look like a bodyweight")
-        if (not readings and weight is None and not entry.get("note")
+        fat = entry.get("body_fat_pct")
+        if fat is not None and not (2 <= float(fat) <= 70):
+            raise ValueError(f"{fat!r}% doesn't look like a body-fat reading")
+        ffm = entry.get("fat_free_mass_kg")
+        if ffm is not None and not (20 <= float(ffm) <= 150):
+            raise ValueError(f"{ffm!r} kg doesn't look like a fat-free mass")
+        if ffm is not None and weight is not None and float(ffm) >= float(weight):
+            raise ValueError("fat-free mass has to be less than bodyweight")
+        body = fat is not None or ffm is not None
+        if (not readings and weight is None and not body and not entry.get("note")
                 and not any(entry.get(f) is not None for f in M.CHECKIN_RATINGS)):
             raise ValueError("nothing to log — give a reading, a weight, a rating, or a note")
         return rawstore.write(self.config.raw_dir, self.name, "entry", entry)
@@ -78,6 +87,11 @@ class CheckInSource(Source):
         for field in M.CHECKIN_RATINGS:
             observe(field, entry.get(field))
         observe(M.BODY_MASS, entry.get("weight_kg"))
+        observe(M.BODY_FAT, entry.get("body_fat_pct"))
+        # Fat-free mass is what energy availability divides by. Scales also
+        # report "soft lean" and "muscle" mass, which leave out bone mineral
+        # and are smaller; only the fat-free figure belongs here.
+        observe(M.LEAN_MASS, entry.get("fat_free_mass_kg"))
 
         readings = entry.get("bp_readings") or []
         if readings:

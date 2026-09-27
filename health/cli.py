@@ -244,13 +244,17 @@ def cmd_checkin(args, config) -> int:
     given = {metric_names.get(f, f): getattr(args, f) for f in fields
             if getattr(args, f) is not None}
 
-    if args.bp or given or args.note or args.weight is not None:
+    body = {"body_fat_pct": args.body_fat, "fat_free_mass_kg": args.fat_free_mass}
+    body = {k: v for k, v in body.items() if v is not None}
+
+    if args.bp or given or args.note or args.weight is not None or body:
         readings = [[*_parse_bp(b), args.pulse] for b in (args.bp or [])]
         entry = {**given}
         if readings:
             entry["bp_readings"] = readings
         if args.weight is not None:
             entry["weight_kg"] = args.weight
+        entry.update(body)
         if args.note:
             entry["note"] = args.note
     else:
@@ -1369,6 +1373,10 @@ def build_parser() -> argparse.ArgumentParser:
     checkin_cmd.add_argument("--pulse", type=int)
     checkin_cmd.add_argument("--weight", type=float, metavar="KG",
                              help="this morning's bodyweight")
+    checkin_cmd.add_argument("--body-fat", type=float, metavar="PCT",
+                             help="body fat %% from a scale or scan")
+    checkin_cmd.add_argument("--fat-free-mass", type=float, metavar="KG",
+                             help="fat-free mass (not 'soft lean' or 'muscle' mass)")
     checkin_cmd.add_argument("--energy", type=int, choices=range(1, 6))
     checkin_cmd.add_argument("--mood", type=int, choices=range(1, 6))
     checkin_cmd.add_argument("--stress", type=int, choices=range(1, 6))

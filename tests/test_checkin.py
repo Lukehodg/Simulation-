@@ -54,6 +54,31 @@ def test_parse_averages_the_bp_readings_and_keeps_the_raw_ones(tmp_path):
     assert records.checkins[0].readings == "128/82,126/80"
 
 
+def test_body_composition_lands_as_its_own_metrics(tmp_path):
+    source = CheckInSource(_Cfg(tmp_path))
+    path = source.add({"date": "2026-09-27", "weight_kg": 90.9,
+                       "body_fat_pct": 23.7, "fat_free_mass_kg": 69.4})
+    values = {o.metric: o.value for o in source.parse(path).observations}
+
+    assert values["body_mass"] == 90.9
+    assert values["body_fat_pct"] == 23.7
+    # the denominator energy availability divides by
+    assert values["lean_mass"] == 69.4
+
+
+def test_body_composition_alone_is_enough_to_log(tmp_path):
+    source = CheckInSource(_Cfg(tmp_path))
+    assert source.add({"date": "2026-09-27", "body_fat_pct": 23.7})
+
+
+def test_implausible_body_composition_is_refused(tmp_path):
+    source = CheckInSource(_Cfg(tmp_path))
+    with pytest.raises(ValueError, match="body-fat"):
+        source.add({"date": "2026-09-27", "body_fat_pct": 237})
+    with pytest.raises(ValueError, match="less than bodyweight"):
+        source.add({"date": "2026-09-27", "weight_kg": 60, "fat_free_mass_kg": 69.4})
+
+
 # -- feature layer -------------------------------------------------------
 
 def _log(store, day: date, *, bp=None, note=None, **ratings):
