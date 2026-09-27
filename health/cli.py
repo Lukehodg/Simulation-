@@ -1023,6 +1023,20 @@ def cmd_lifts(args, config) -> int:
 PROGRAM_FOLDER = "AI Coach"
 
 
+def _compound_cell(entry: dict) -> str:
+    """One active compound on the plan's `on` line. Same vocabulary as
+    `_print_protocol`, compressed to fit beside the session."""
+    head = str(entry["label"])
+    if entry.get("weekly_dose") is not None:
+        head += f" {entry['weekly_dose']:g} {entry.get('unit') or ''}".rstrip() + "/wk"
+    tail = []
+    if entry.get("weeks_on"):
+        tail.append(f"week {entry['weeks_on']:.0f}")
+    if not entry.get("settled"):
+        tail.append("still building")
+    return head + (", " + ", ".join(tail) if tail else "")
+
+
 def _print_plan(plan, pushed: str | None = None) -> None:
     heading = f"{plan.day:%a %d %b} — {plan.kind}"
     print(heading)
@@ -1034,6 +1048,10 @@ def _print_plan(plan, pushed: str | None = None) -> None:
         print(f"  {adjustment}")
     if plan.deload and not plan.is_rest:
         print("deload week: 85% load, one set fewer, stop well short of failure")
+    if plan.protocol:
+        print("on      " + "; ".join(_compound_cell(e) for e in plan.protocol))
+        if plan.protocol_note:
+            print(f"        {plan.protocol_note}")
 
     if plan.is_rest:
         print("\nno lifting today — recovery is where the session you did gets paid for")
@@ -1055,6 +1073,9 @@ def _print_plan(plan, pushed: str | None = None) -> None:
     if plan.protein:
         target = f"{plan.protein.target_g} g" if plan.protein.target_g else "—"
         print(f"protein {target} — {plan.protein.why}")
+        if plan.protein.note:
+            lead = "watch: " if plan.protein.flag == "watch" else ""
+            print(f"        {lead}{plan.protein.note}")
     if plan.energy:
         print(f"energy  -{plan.energy.deficit_target} kcal/day — {plan.energy.why}")
 

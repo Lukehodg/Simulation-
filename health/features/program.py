@@ -6,7 +6,7 @@ routine Hevy can open. That is deliberate — the same rule as
 `features/training.py`. Adjusting rep ranges is not medicine, the feedback loop
 is one session long, and the cost of being wrong is a mediocre week.
 
-Three things make this different from a programme written on paper:
+Four things make this different from a programme written on paper:
 
   * **Loads come from your history, not a percentage of a max.** Hold the
     weight until every working set reaches the top of the rep range, then add
@@ -17,6 +17,13 @@ Three things make this different from a programme written on paper:
   * **Cardio and steps are prescribed against the scale.** Losing slower than
     the target band adds steps; faster than it takes them away, because weight
     coming off too fast stops being fat.
+  * **What you are on travels with the session.** `features/protocol.py` knows
+    the compounds and what each is documented to do, so the plan carries them
+    into the printout and the Hevy note, and reads a protein shortfall as the
+    thing to watch while something is suppressing appetite. What it never does
+    is programme *from* a dose: no set, rep, load or target in this module
+    moves because of one. That is the line `compounds.py` holds, and surfacing
+    context is on the safe side of it.
 
 The split is Push / Pull / Legs / Rest / Upper / Lower, with cardio placed
 after lifting (doing it first measurably blunts strength output) and one HIIT
@@ -36,7 +43,9 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from statistics import mean
 
+from .. import compounds as compounds_kb
 from ..store import Store
+from . import protocol as protocol_features
 from . import readiness as readiness_features
 
 # -- the programme -----------------------------------------------------------
@@ -63,8 +72,16 @@ MAX_SENSIBLE_REPS = 30
 LOSS_BAND_PCT = (0.3, 0.7)
 #: Protein per kg of bodyweight per day: the one nutrition lever that decides
 #: whether a deficit costs muscle. Returns flatten around 1.6 in the
-#: meta-analyses; 2.0 is the sensible target while cutting.
+#: meta-analyses; 2.0 is the sensible target while cutting. This number does
+#: not move for what anyone is on — see the module docstring.
 PROTEIN_G_PER_KG = 2.0
+#: A day this far under the target is short. Smaller misses are logging noise.
+PROTEIN_SHORT_G = 10.0
+#: An appetite-suppressing compound turns one short day into a pattern worth
+#: naming, but only a pattern: the flag needs this many logged days out of the
+#: last seven, and this share of them short, before it fires.
+PROTEIN_WATCH_MIN_DAYS = 3
+PROTEIN_WATCH_SHARE = 0.5
 STEPS_BASE, STEPS_MIN, STEPS_MAX = 12_000, 10_000, 14_000
 STEPS_REST_BONUS = 1_000
 ZONE2_MINUTES = 30
@@ -585,32 +602,108 @@ def priority_volume(store: Store, as_of: date, days: int = 7) -> list[MuscleVolu
     return [MuscleVolume(m, counts[m], PRIORITY[m]) for m in PRIORITY]
 
 
+# -- what you are on ---------------------------------------------------------
+#
+# Context, never an input to a prescription. `protocol.py` draws the same line
+# and its docstring says why.
+
+
+def _protocol_day(day: date) -> date:
+    """Which day to read the protocol for.
+
+    `protocol_days` is only built out to today, so a future day — every day but
+    the first of a `--week` plan — reads what is in force now. An open-ended
+    course is still running then, and one already stopped will not restart, so
+    today is the honest answer rather than an empty one.
+    """
+    return min(day, date.today())
+
+
+def _protocol_on(store: Store, day: date) -> list[protocol_features.Active]:
+    """The compounds in force on `day`."""
+    return protocol_features.active(store, _protocol_day(day))
+
+
 @dataclass
 class Protein:
     target_g: int | None
     yesterday_g: float | None
     why: str
+    week_days_logged: int = 0
+    week_days_short: int = 0
+    #: "watch" when an appetite-suppressing compound is on and the week's
+    #: shortfall is a pattern rather than one bad day.
+    flag: str | None = None
+    note: str | None = None
 
     def as_dict(self) -> dict:
-        return {"target_g": self.target_g, "yesterday_g": self.yesterday_g, "why": self.why}
+        return {"target_g": self.target_g, "yesterday_g": self.yesterday_g,
+                "why": self.why, "week_days_logged": self.week_days_logged,
+                "week_days_short": self.week_days_short, "flag": self.flag,
+                "note": self.note}
+
+
+def _protein_week(store: Store, day: date, target: int) -> tuple[int, int]:
+    """(days with protein logged, days short) over the week before `day`."""
+    rows = store.query(
+        "SELECT value FROM daily_metrics WHERE metric = 'protein' "
+        "AND local_date BETWEEN ? AND ?",
+        [day - timedelta(days=7), day - timedelta(days=1)])
+    logged = [float(v) for (v,) in rows if v is not None]
+    return len(logged), sum(1 for grams in logged if target - grams > PROTEIN_SHORT_G)
 
 
 def protein_target(store: Store, day: date) -> Protein:
+    """The protein target, and how the week went against it.
+
+    The target itself is bodyweight and nothing else. What the compounds change
+    is how a miss reads: on a GLP-1 the appetite suppression is the mechanism,
+    and `compounds.py` already names "appetite suppression plus a heavy training
+    load" as the combination to watch. Saying so is not a protocol change.
+    """
     _trend, weight = weight_trend(store, day)
     row = store.query(
         "SELECT value FROM daily_metrics WHERE metric = 'protein' AND local_date = ?",
         [day - timedelta(days=1)])
     yesterday = float(row[0][0]) if row and row[0][0] is not None else None
+    suppressing = [a.label.lower() for a in _protocol_on(store, day)
+                   if (spec := compounds_kb.COMPOUNDS.get(a.compound))
+                   and spec.klass == "glp1"]
+    on = ", ".join(suppressing)
+
     if weight is None:
-        return Protein(None, yesterday,
-                       f"{PROTEIN_G_PER_KG:g} g per kg: log bodyweight to get the number")
+        return Protein(
+            None, yesterday,
+            f"{PROTEIN_G_PER_KG:g} g per kg: log bodyweight to get the number",
+            note=(f"on {on}, where the protein floor matters most — and it needs "
+                  f"a bodyweight before there is a number to miss")
+            if suppressing else None)
+
     target = int(round(weight * PROTEIN_G_PER_KG / 5) * 5)
     why = f"{PROTEIN_G_PER_KG:g} g/kg at {weight:g} kg"
     if yesterday is not None:
         gap = target - yesterday
-        why += (f"; yesterday {yesterday:.0f} g, {gap:.0f} g short" if gap > 10
+        why += (f"; yesterday {yesterday:.0f} g, {gap:.0f} g short"
+                if gap > PROTEIN_SHORT_G
                 else f"; yesterday {yesterday:.0f} g, on target")
-    return Protein(target, yesterday, why)
+
+    logged, short = _protein_week(store, day, target)
+    flag, note = None, None
+    if suppressing and logged < PROTEIN_WATCH_MIN_DAYS:
+        note = (f"on {on}: protein logged on {logged} of the last 7 days, too few "
+                f"for a shortfall to show up — log it while appetite is suppressed")
+    elif suppressing and short >= logged * PROTEIN_WATCH_SHARE:
+        flag = "watch"
+        note = (f"on {on}, short on {short} of {logged} logged days this week — "
+                f"appetite suppression alongside a training load is the documented "
+                f"combination to watch, and protein is what decides whether the "
+                f"weight coming off is fat")
+    elif suppressing:
+        note = (f"on {on}, and holding it — {logged - short} of {logged} logged "
+                f"days at target")
+
+    return Protein(target, yesterday, why, week_days_logged=logged,
+                   week_days_short=short, flag=flag, note=note)
 
 
 # -- energy balance ------------------------------------------------------------
@@ -718,6 +811,9 @@ class SessionPlan:
     energy: EnergyBalance | None = None
     volume: list[MuscleVolume] = field(default_factory=list)
     readiness: str | None = None
+    #: the compounds in force, as `protocol.Active.as_dict()` — context only
+    protocol: list[dict] = field(default_factory=list)
+    protocol_note: str | None = None
     adjustments: list[str] = field(default_factory=list)
     unmatched: list[str] = field(default_factory=list)
 
@@ -729,6 +825,7 @@ class SessionPlan:
         return {
             "date": str(self.day), "session": self.kind, "title": self.title,
             "deload": self.deload, "readiness": self.readiness,
+            "on": self.protocol, "protocol_note": self.protocol_note,
             "adjustments": self.adjustments,
             "exercises": [e.as_dict() for e in self.exercises],
             "cardio": self.cardio.as_dict() if self.cardio else None,
@@ -756,6 +853,11 @@ def plan_session(store: Store, day: date | None = None, *,
 
     title = f"AI {kind.title()}" + (" (deload)" if deload and kind != "rest" else "")
     plan = SessionPlan(day=day, kind=kind, title=title, deload=deload)
+
+    # Read before readiness so the context is there on a rest day and under
+    # --no-regulate too: it is not a recovery signal, it is what you are on.
+    plan.protocol = [a.as_dict() for a in _protocol_on(store, day)]
+    plan.protocol_note = protocol_features.strength_note(store, _protocol_day(day))
 
     call = None
     if auto_regulate:
@@ -838,6 +940,15 @@ def week_plan(store: Store, start: date | None = None) -> list[SessionPlan]:
 
 # -- the Hevy payload --------------------------------------------------------
 
+#: Whether the routine pushed to Hevy names the compounds you are on. The local
+#: plan always does — it stays on this machine. Hevy is someone else's server,
+#: so the weekly dose is never sent whatever this is set to, and the names go
+#: only while it is on. Set it to False to keep the protocol off Hevy entirely;
+#: the strength-confound line below carries no compound name and stays either
+#: way, which is the part that is useful mid-session anyway.
+NAME_PROTOCOL_IN_HEVY = True
+
+
 def routine_payload(plan: SessionPlan, folder_id: int | None = None) -> dict:
     """The body Hevy's POST/PUT /v1/routines expects."""
     exercises = []
@@ -867,13 +978,27 @@ def routine_payload(plan: SessionPlan, folder_id: int | None = None) -> dict:
 
 
 def routine_notes(plan: SessionPlan) -> str:
+    """The routine's own note, in Hevy's 255 characters.
+
+    Ordered by what it would cost to lose: `routine_payload` truncates, so the
+    session's instructions come first and the protocol context goes last. A
+    third compound pushing the note over the limit should cost the caveat, not
+    the step target.
+    """
     parts = [plan.day.isoformat()]
     parts.append("DELOAD — back off, stop well short" if plan.deload
                  else "every working set within 1-2 reps of failure")
     if plan.readiness:
         parts.append(f"readiness: {plan.readiness.replace('_', ' ')}")
+    if plan.protein and plan.protein.flag == "watch" and plan.protein.target_g:
+        parts.append(f"protein {plan.protein.target_g} g, short most of this week")
     if plan.cardio and plan.cardio.kind != "none":
         parts.append(f"{plan.cardio.kind} {plan.cardio.minutes} min after lifting")
     if plan.steps:
         parts.append(f"steps {plan.steps.target:,}")
+    if plan.protocol and NAME_PROTOCOL_IN_HEVY:
+        parts.append("on " + ", ".join(
+            str(entry["label"]).lower() for entry in plan.protocol))
+    if plan.protocol_note:
+        parts.append("strength is compound plus training, a stall says more")
     return ". ".join(parts)

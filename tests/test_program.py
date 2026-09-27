@@ -5,7 +5,8 @@ from datetime import date, datetime, timedelta, timezone
 import pytest
 
 from health.features import program
-from health.models import ExerciseTemplate, Observation, Records, StrengthSet
+from health.models import (ExerciseTemplate, Observation, ProtocolEvent, Records,
+                           StrengthSet)
 
 BENCH = "Bench Press (Barbell)"
 MONDAY = date(2026, 9, 14)          # push day in the week map
@@ -88,6 +89,31 @@ def _weigh(store, day: date, kg: float) -> None:
                     ts=datetime.combine(day, datetime.min.time(), tzinfo=timezone.utc),
                     local_date=day, unit="kg")
     ]))
+
+
+def _steady_weight(store, kg: float = 90.0, day: date = MONDAY) -> None:
+    for offset in range(14):
+        _weigh(store, day - timedelta(days=13 - offset), kg)
+
+
+def _protein(store, day: date, grams: float) -> None:
+    store.load(Records(observations=[
+        Observation(source="apple_health", source_id=f"protein-{day}",
+                    metric="protein", value=grams, unit="g", local_date=day,
+                    ts=datetime.combine(day, datetime.min.time(), tzinfo=timezone.utc))
+    ]))
+
+
+def _on(store, compound: str, dose: float, *, start: date,
+        freq: str = "weekly", unit: str = "mg") -> None:
+    """Log a protocol start and rebuild the day-by-day table from it."""
+    from health.features import protocol as protocol_features
+
+    store.load(Records(protocol_events=[
+        ProtocolEvent(source="protocol", local_date=start, event="start",
+                      compound=compound, dose=dose, unit=unit, freq=freq)
+    ]))
+    protocol_features.rebuild(store)
 
 
 # -- the week ----------------------------------------------------------------
@@ -459,3 +485,165 @@ def test_the_plan_serialises_for_the_agent(gym):
     assert data["session"] == "push"
     assert data["steps"]["target"]
     assert isinstance(data["exercises"], list)
+
+
+# -- what you are on ---------------------------------------------------------
+
+def test_the_plan_carries_what_you_are_on(gym):
+    _on(gym, "testosterone", 200, start=MONDAY - timedelta(weeks=12))
+    _on(gym, "retatrutide", 2, start=MONDAY - timedelta(weeks=2))
+    plan = program.plan_session(gym, MONDAY, auto_regulate=False)
+
+    on = {entry["compound"]: entry for entry in plan.protocol}
+    assert (on["testosterone"]["weekly_dose"], on["testosterone"]["unit"]) == (200, "mg")
+    assert on["retatrutide"]["weekly_dose"] == 2
+    assert on["testosterone"]["settled"]              # 12 weeks in, onset is 10
+    assert not on["retatrutide"]["settled"]           # 2 weeks in, onset is 4
+    assert "compound plus training" in plan.protocol_note
+    assert plan.as_dict()["on"] == plan.protocol
+
+
+def test_being_on_something_changes_no_prescribed_number(gym):
+    """The boundary, as a test. `compounds.py` gives context and monitoring and
+    refuses to programme from a dose; this pins that down for the one module
+    that actually writes a prescription."""
+    _log(gym, MONDAY - timedelta(days=7), BENCH, [(80.0, 9, "normal")])
+    _steady_weight(gym)
+    clean = program.plan_session(gym, MONDAY, auto_regulate=False).as_dict()
+
+    _on(gym, "testosterone", 200, start=MONDAY - timedelta(weeks=12))
+    _on(gym, "retatrutide", 2, start=MONDAY - timedelta(weeks=8))
+    loaded = program.plan_session(gym, MONDAY, auto_regulate=False).as_dict()
+
+    assert loaded["on"] and not clean["on"]
+    for key in ("exercises", "cardio", "steps", "priority_volume", "energy"):
+        assert loaded[key] == clean[key], f"{key} moved because of a compound"
+    assert loaded["protein"]["target_g"] == clean["protein"]["target_g"]
+
+
+def test_a_rest_day_still_says_what_you_are_on(gym):
+    _on(gym, "retatrutide", 2, start=MONDAY - timedelta(weeks=6))
+    plan = program.plan_session(gym, MONDAY + timedelta(days=3))
+    assert plan.is_rest
+    assert [e["compound"] for e in plan.protocol] == ["retatrutide"]
+
+
+def test_a_future_day_reads_the_protocol_in_force_now(gym):
+    """`protocol_days` stops at today, but an open-ended course is still running
+    on Thursday — so a week plan carries it rather than showing nothing."""
+    _on(gym, "retatrutide", 2, start=date.today() - timedelta(weeks=6))
+    plans = program.week_plan(gym, date.today())
+    assert all([e["compound"] for e in p.protocol] == ["retatrutide"] for p in plans)
+
+
+def test_the_hevy_note_names_the_compounds_but_never_the_dose(gym):
+    _on(gym, "testosterone", 200, start=MONDAY - timedelta(weeks=12))
+    _on(gym, "retatrutide", 2, start=MONDAY - timedelta(weeks=6))
+    plan = program.plan_session(gym, MONDAY, auto_regulate=False)
+    notes = program.routine_payload(plan)["notes"]
+
+    assert "testosterone" in notes and "retatrutide" in notes
+    assert "200" not in notes and "/wk" not in notes
+    assert "compound plus training" in notes
+    assert len(notes) <= 255
+
+
+def test_the_note_puts_the_prescription_before_the_protocol(gym):
+    """Hevy allows 255 characters and `routine_payload` truncates, so an
+    overflow has to cost the context rather than the step target."""
+    _steady_weight(gym)
+    _on(gym, "testosterone", 200, start=MONDAY - timedelta(weeks=12))
+    plan = program.plan_session(gym, MONDAY, auto_regulate=False)
+
+    notes = program.routine_notes(plan)
+    assert notes.index("steps") < notes.index("on testosterone")
+
+    # Enough compounds to overflow, so the truncation is the real one.
+    from health import compounds as compounds_kb
+    for key in compounds_kb.COMPOUNDS:
+        _on(gym, key, 200, start=MONDAY - timedelta(weeks=12))
+    long = program.plan_session(gym, MONDAY, auto_regulate=False)
+
+    assert len(program.routine_notes(long)) > 255
+    truncated = program.routine_payload(long)["notes"]
+    assert len(truncated) == 255
+    assert f"steps {long.steps.target:,}" in truncated
+
+
+def test_the_protocol_can_be_kept_off_hevy_entirely(gym, monkeypatch):
+    monkeypatch.setattr(program, "NAME_PROTOCOL_IN_HEVY", False)
+    _on(gym, "retatrutide", 2, start=MONDAY - timedelta(weeks=6))
+    plan = program.plan_session(gym, MONDAY, auto_regulate=False)
+
+    assert "retatrutide" not in program.routine_payload(plan)["notes"]
+    assert plan.protocol                     # still on the local plan
+
+
+# -- protein against an appetite-suppressing compound -------------------------
+
+def test_a_sustained_protein_shortfall_is_flagged_on_a_glp1(gym):
+    _steady_weight(gym)
+    for offset in range(1, 7):
+        _protein(gym, MONDAY - timedelta(days=offset), 120.0)     # target is 180
+    _on(gym, "retatrutide", 2, start=MONDAY - timedelta(weeks=6))
+
+    protein = program.protein_target(gym, MONDAY)
+    assert protein.target_g == 180
+    assert (protein.week_days_logged, protein.week_days_short) == (6, 6)
+    assert protein.flag == "watch"
+    assert "retatrutide" in protein.note
+
+
+def test_the_same_shortfall_without_a_compound_is_not_escalated(gym):
+    _steady_weight(gym)
+    for offset in range(1, 7):
+        _protein(gym, MONDAY - timedelta(days=offset), 120.0)
+
+    protein = program.protein_target(gym, MONDAY)
+    assert protein.week_days_short == 6
+    assert protein.flag is None and protein.note is None
+    assert "60 g short" in protein.why           # yesterday still reads plainly
+
+
+def test_an_androgen_alone_does_not_touch_the_protein_note(gym):
+    """The appetite mechanism belongs to the GLP-1 class, not to being on
+    something."""
+    _steady_weight(gym)
+    for offset in range(1, 7):
+        _protein(gym, MONDAY - timedelta(days=offset), 120.0)
+    _on(gym, "testosterone", 200, start=MONDAY - timedelta(weeks=12))
+
+    protein = program.protein_target(gym, MONDAY)
+    assert protein.flag is None and protein.note is None
+
+
+def test_hitting_protein_on_a_glp1_says_so_rather_than_nothing(gym):
+    _steady_weight(gym)
+    for offset in range(1, 7):
+        _protein(gym, MONDAY - timedelta(days=offset), 185.0)
+    _on(gym, "retatrutide", 2, start=MONDAY - timedelta(weeks=6))
+
+    protein = program.protein_target(gym, MONDAY)
+    assert protein.flag is None
+    assert "holding it" in protein.note
+
+
+def test_too_few_logged_days_reads_as_a_gap_not_a_pass(gym):
+    _steady_weight(gym)
+    _protein(gym, MONDAY - timedelta(days=1), 110.0)
+    _on(gym, "retatrutide", 2, start=MONDAY - timedelta(weeks=6))
+
+    protein = program.protein_target(gym, MONDAY)
+    assert protein.flag is None
+    assert "too few" in protein.note
+
+
+def test_the_protein_watch_reaches_the_hevy_note(gym):
+    _steady_weight(gym)
+    for offset in range(1, 7):
+        _protein(gym, MONDAY - timedelta(days=offset), 120.0)
+    _on(gym, "retatrutide", 2, start=MONDAY - timedelta(weeks=6))
+
+    plan = program.plan_session(gym, MONDAY, auto_regulate=False)
+    assert plan.protein.flag == "watch"
+    assert "protein 180 g, short most of this week" in program.routine_notes(plan)

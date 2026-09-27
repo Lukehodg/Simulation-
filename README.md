@@ -47,7 +47,7 @@ Built and tested:
 | **Bloods page** | Drop a report in, see what is flagged, ask Claude to read it |
 | **Indicators** | Per-domain status with the evidence behind each — deliberately no single score |
 | **Training observations** | Stalled, dormant, progressing and imbalanced, computed from your sets |
-| **Next session** | `health plan` — double progression from your logged sets, auto-regulated by readiness, with the cardio block and step target; `--push` writes it into Hevy |
+| **Next session** | `health plan` — double progression from your logged sets, auto-regulated by readiness, with the cardio block, step and protein targets, and the compounds you are on carried through as context; `--push` writes it into Hevy |
 
 Next: the Garmin export and `.FIT` parsers, and connecting MyFitnessPal or
 Apple Health nutrition (which is what energy availability above is waiting on).
@@ -206,6 +206,9 @@ health plan --date 2026-09-20 --push  # plan a specific day
 Mon 14 Sep — push
 -----------------
 readiness: proceed
+on      Testosterone (exogenous) 200 mg/wk, week 14; Retatrutide 2 mg/wk, week 3, still building
+        on testosterone (exogenous) since 2026-06-15 (week 14) — read strength trends as the
+        compound plus training, and a stall as more meaningful than it would be otherwise
 
 exercise                           sets     reps      load   why
 Bench Press (Barbell)                 4      6-9   82.5 kg   hit 9 on every set at 80 kg — load goes up 2.5 kg
@@ -216,6 +219,10 @@ Shoulder Press (Dumbbell)             3     8-12     22 kg   hold 22 kg, chase 9
 cardio  Cycling (Indoor): 5 min easy, then 8 x 30s hard / 90s easy, 5 min down
 steps   13,000 — losing 0.19 kg/wk, under the 0.43 kg floor for 85.3 kg — steps up
         last 7 days averaged 9,800
+protein 170 g — 2 g/kg at 85.3 kg; yesterday 125 g, 45 g short
+        watch: on retatrutide, short on 6 of 6 logged days this week — appetite suppression
+        alongside a training load is the documented combination to watch, and protein is
+        what decides whether the weight coming off is fat
 ```
 
 The split runs Push / Pull / Legs / Rest / Upper / Lower as a **chest and arms
@@ -238,7 +245,7 @@ Exercises you have actually logged win over the textbook name in the same slot
 — your rope pushdown beats a generic pushdown — and nothing is used twice in
 one session.
 
-Three things it does that a programme on paper cannot:
+Five things it does that a programme on paper cannot:
 
   * **It reads `readiness` first.** A `hold` call stops loads advancing; a
     `pull_back` drops the last isolation lift, takes a set off everything else,
@@ -261,6 +268,20 @@ Three things it does that a programme on paper cannot:
     against the deficit the band implies (about 500 kcal/day at 90 kg), and
     the seven-day mean over days where both sides exist. An intake under
     1,000 kcal is treated as a day where logging stopped, not a fast.
+  * **What you are on travels with the session.** Whatever `health protocol`
+    knows about is printed above the lifts — weekly dose, weeks in, and whether
+    the slow markers have settled — along with the reminder that strength on an
+    androgen is compound plus training, so a stall says more than it otherwise
+    would. While something in the GLP-1 class is on, a protein shortfall reads
+    as the pattern it is rather than one bad day: short on most of the week's
+    logged days becomes a `watch`, because appetite suppression alongside a
+    training load is the documented combination, and too few logged days is
+    reported as a gap instead of a pass. What the plan never does is programme
+    *from* a dose — sets, reps, loads, steps and the protein target are
+    identical on or off anything, which is the line `compounds.py` holds and
+    the reason there is a test named after it. The compound *names* reach
+    Hevy's routine note, and nothing else does: the doses stay on this machine,
+    and `NAME_PROTOCOL_IN_HEVY = False` keeps the names off it too.
 
 Every sixth week — counted from your first logged workout, not the calendar —
 deloads on its own: 85% load, one set fewer, cardio halved.
