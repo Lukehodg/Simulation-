@@ -5,6 +5,7 @@ from datetime import date, datetime, timezone
 import httpx
 import pytest
 
+from health.models import Records
 from health.sources.whoop import WhoopSource, _rmssd_ms
 
 
@@ -99,3 +100,43 @@ def test_expired_token_triggers_a_refresh(config, monkeypatch):
     assert source._access_token() == "fresh"
     assert posted["grant_type"] == "refresh_token"
     assert posted["refresh_token"] == "refresh-me"
+
+
+# -- the physiological day ----------------------------------------------------
+
+def test_a_cycle_is_credited_to_the_day_it_ends_on(config):
+    """WHOOP's day runs from one evening's sleep onset to the next, so the
+    cycle starting Tuesday night is Wednesday's strain, burn and steps —
+    keying on the start files every one of them a day early."""
+    source = WhoopSource(config)
+    records = Records()
+    source._parse_cycle({
+        "id": 1, "start": "2026-09-22T22:04:46.180Z", "end": "2026-09-23T20:47:10.120Z",
+        "step_count": 16836,
+        "score": {"strain": 12.5, "kilojoule": 9000.0, "average_heart_rate": 70},
+    }, records)
+    days = {o.metric: o.local_date for o in records.observations}
+    assert days["steps"] == date(2026, 9, 23)
+    assert days["strain"] == date(2026, 9, 23)
+    assert days["energy_expenditure"] == date(2026, 9, 23)
+    steps = next(o for o in records.observations if o.metric == "steps")
+    assert steps.value == 16836
+
+
+def test_a_cycle_ending_after_midnight_belongs_to_the_day_that_finished(config):
+    source = WhoopSource(config)
+    records = Records()
+    source._parse_cycle({"id": 2, "start": "2026-09-23T21:00:00Z",
+                         "end": "2026-09-25T00:40:00Z", "step_count": 5000,
+                         "score": {"strain": 8.0}}, records)
+    assert next(o for o in records.observations if o.metric == "steps").local_date         == date(2026, 9, 24)
+
+
+def test_an_unscored_cycle_still_carries_its_steps(config):
+    """step_count sits on the cycle, not inside score, so it survives a cycle
+    WHOOP has not scored yet."""
+    source = WhoopSource(config)
+    records = Records()
+    source._parse_cycle({"id": 3, "start": "2026-09-27T21:00:00Z",
+                         "end": "2026-09-28T20:00:00Z", "step_count": 10957}, records)
+    assert [(o.metric, o.value) for o in records.observations] == [("steps", 10957.0)]

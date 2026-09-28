@@ -29,7 +29,8 @@ from .. import lockfile
 from .. import raw as rawstore
 from ..models import CycleEvent, Observation, Records, Sleep, Workout
 from ..secrets import get_secret, read_tokens, write_tokens
-from ..timeutil import isoformat, local_date, parse_ts, sleep_local_date
+from ..timeutil import (cycle_local_date, isoformat, local_date, parse_ts,
+                        sleep_local_date)
 from .base import Source
 
 API_BASE = "https://api.prod.whoop.com/developer"
@@ -329,7 +330,7 @@ class WhoopSource(Source):
         start = parse_ts(item.get("start"))
         if not (sid and start):
             return
-        day = local_date(start, self.config.timezone)
+        day = cycle_local_date(start, parse_ts(item.get("end")), self.config.timezone)
         self._observe(records, start, day, M.STRAIN, _score(item, "strain"), sid)
         self._observe(records, start, day, M.HR_AVG, _score(item, "average_heart_rate"), sid)
         self._observe(records, start, day, M.HR_MAX, _score(item, "max_heart_rate"), sid)
@@ -339,6 +340,12 @@ class WhoopSource(Source):
         kj = _score(item, "kilojoule")
         if kj is not None:
             self._observe(records, start, day, M.ENERGY_EXPENDITURE, kj / KJ_PER_KCAL, sid)
+        # `step_count` sits on the cycle itself rather than inside `score`,
+        # unlike everything else here — and WHOOP only started sending it in
+        # 2026, so older cycles carry none and the phone stays the source there.
+        steps = item.get("step_count")
+        if isinstance(steps, (int, float)):
+            self._observe(records, start, day, M.STEPS, float(steps), sid)
 
     def _parse_workout(self, item: dict, records: Records) -> None:
         sid = _record_id(item)

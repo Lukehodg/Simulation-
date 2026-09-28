@@ -25,7 +25,7 @@ Built and tested:
 | | |
 |---|---|
 | **Storage** | DuckDB schema, canonical views, idempotent loading, replay from raw |
-| **WHOOP** | OAuth 2.0 flow, token refresh, incremental paging, sleep / recovery / cycle / workout parsing |
+| **WHOOP** | OAuth 2.0 flow, token refresh, incremental paging, sleep / recovery / cycle / workout parsing, steps and whole-day burn credited to the physiological day |
 | **Hevy** | Full history paging, incremental events feed, set-level parsing, upstream edits and deletions |
 | **Apple Health** | Health Auto Export JSON — carries Garmin dailies, MyFitnessPal macros, sleep and period logs |
 | **Strength analysis** | Estimated 1RM trends with their fit, weekly tonnage by muscle group, stale-lift detection |

@@ -71,6 +71,22 @@ def sleep_local_date(end: datetime, tz: ZoneInfo) -> date:
     return local_date(end, tz)
 
 
+def cycle_local_date(start: datetime, end: datetime | None, tz: ZoneInfo) -> date:
+    """A WHOOP physiological day is credited to the day it ends on.
+
+    A cycle runs from one evening's sleep onset to the next — 22 Sep 22:04 to
+    23 Sep 20:47 is the app's "Wednesday 23rd", and its strain, burn and steps
+    are Wednesday's. Keying on the start would file every one of them a day
+    early. The open cycle has no end yet; it is today by construction. An end
+    just after midnight belongs to the day that has just finished, the same
+    rule sleep uses for a late wake.
+    """
+    if end is None:
+        return local_date(datetime.now(timezone.utc), tz)
+    local_end = end.astimezone(tz)
+    return (local_end - timedelta(hours=4)).date()
+
+
 def day_bounds(day: date, tz: ZoneInfo) -> tuple[datetime, datetime]:
     """UTC instants bracketing a local calendar day (DST-correct)."""
     start = datetime.combine(day, time.min, tzinfo=tz)

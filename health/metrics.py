@@ -99,7 +99,9 @@ SOURCE_PRIORITY: dict[str, list[str]] = {
     SLEEP_EFFICIENCY: ["whoop", "garmin_fit", "apple_health"],
     RECOVERY_SCORE: ["whoop"],
     STRAIN: ["whoop"],
-    STEPS: ["garmin_fit", "garmin_export", "apple_health"],
+    # WHOOP counts the whole day on the wrist; a phone only counts what was
+    # carried. Where both exist the wrist is the honest one.
+    STEPS: ["whoop", "garmin_fit", "garmin_export", "apple_health"],
     ACTIVE_ENERGY: ["garmin_fit", "garmin_export", "apple_health"],
     ENERGY_EXPENDITURE: ["whoop", "garmin_fit", "garmin_export"],
     BODY_MASS: ["apple_health", "garmin_export", "whoop", "checkin"],
