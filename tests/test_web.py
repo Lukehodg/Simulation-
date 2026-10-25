@@ -9,7 +9,7 @@ import threading
 from datetime import date, datetime, time, timedelta, timezone
 from http.server import ThreadingHTTPServer
 from pathlib import Path
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 import pytest
 
@@ -366,3 +366,58 @@ def test_an_empty_database_still_carries_the_new_keys_without_erroring(db, confi
                "sleep_architecture", "check_in", "blood_pressure", "experiments",
                "weekly_research", "load_chart", "sleep_debt_chart"):
         assert key in payload
+
+
+# -- the training page --------------------------------------------------------
+
+def test_the_training_page_serves_the_plan_and_its_actions(db, config):
+    """The page offers to push to Hevy and to log a weigh-in, so the routes
+    behind those buttons have to exist and to refuse bad input rather than
+    acting on it — a write surface is the one thing worth testing here."""
+    _seed(db)
+    db.close()
+    handler = type("Bound", (Handler,), {"config": config})
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+
+    def post(path: str, payload: dict) -> dict:
+        request = Request(base + path, data=json.dumps(payload).encode(),
+                          headers={"Content-Type": "application/json"})
+        return json.loads(urlopen(request).read())
+
+    try:
+        page = urlopen(base + "/plan").read().decode()
+        plan = json.loads(urlopen(base + "/api/plan").read())
+        nonsense = post("/api/checkin", {"action": "weigh", "weight_kg": 999})
+        logged = post("/api/checkin", {"action": "weigh", "weight_kg": 91.4})
+        unknown = post("/api/checkin", {"action": "teleport"})
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    assert "<title>health · training</title>" in page
+    assert plan["plan"]["session"] in plan["sessions"]
+    assert "exercises" in plan["plan"]
+    assert nonsense["ok"] is False and "not a bodyweight" in nonsense["message"]
+    assert logged["ok"] is True and "91.4" in logged["message"]
+    assert unknown["ok"] is False
+
+    with Store(config.db_path, read_only=True) as store:
+        rows = store.query("SELECT value FROM observations WHERE metric = 'body_mass'")
+    assert [row[0] for row in rows] == [91.4]
+
+
+def test_the_training_page_can_be_asked_for_another_session(db, config):
+    _seed(db)
+    db.close()
+    handler = type("Bound", (Handler,), {"config": config})
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        asked = json.loads(urlopen(base + "/api/plan?session=pull").read())
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert asked["plan"]["session"] == "pull"

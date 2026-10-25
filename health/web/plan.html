@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>health · training</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chivo:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/style.css">
+<style>
+  /* The lift table is the one thing this page has that the others do not:
+     a load column that has to be readable across the room, and a reason
+     under it that has to not compete with it. */
+  .lift { display: grid; grid-template-columns: 1fr 88px 92px;
+          gap: 2px 18px; padding: 11px 0; border-bottom: 1px solid var(--hair); }
+  .lift:last-child { border-bottom: 0; }
+  .lift .name { font-weight: 600; }
+  .lift .scheme, .lift .load { font-family: "JetBrains Mono", monospace;
+                               font-variant-numeric: tabular-nums; text-align: right; }
+  .lift .load { font-weight: 500; font-size: 17px; }
+  .lift .why { grid-column: 1 / -1; color: var(--soft); font-size: 13px; }
+  .lift .cue { grid-column: 1 / -1; color: var(--soft); font-size: 13px; font-style: italic; }
+
+  .targets { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+             gap: 0 28px; }
+  .target { padding: 11px 0; border-bottom: 1px solid var(--hair); }
+  .target .k { font-family: "JetBrains Mono", monospace; font-size: 11px;
+               letter-spacing: 0.08em; text-transform: uppercase; color: var(--soft); }
+  .target .v { font-family: "JetBrains Mono", monospace; font-size: 19px; font-weight: 500; }
+  .target .why { color: var(--soft); font-size: 13px; }
+
+  .vol { display: grid; grid-template-columns: 76px 1fr 54px; align-items: center;
+         gap: 14px; padding: 7px 0; }
+  .vol .track { position: relative; height: 7px; background: var(--hair); }
+  .vol .band { position: absolute; top: 0; bottom: 0; background: var(--rule); }
+  .vol .fill { position: absolute; top: 0; bottom: 0; left: 0; }
+  .vol .n { font-family: "JetBrains Mono", monospace; text-align: right;
+            font-variant-numeric: tabular-nums; }
+
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+             padding-top: 14px; }
+  .actions input[type="number"], .actions input[type="text"], .actions select {
+    font-family: "JetBrains Mono", monospace; font-size: 14px; color: var(--ink);
+    background: var(--panel); border: 1px solid var(--rule); padding: 8px 10px; }
+  .actions input[type="text"] { font-family: "Chivo", sans-serif; min-width: 220px; }
+  .actions button { font-family: "Chivo", sans-serif; font-weight: 600; font-size: 14px;
+    color: var(--paper); background: var(--ink); border: 1px solid var(--ink);
+    padding: 8px 16px; cursor: pointer; }
+  .actions button.quiet { color: var(--ink); background: transparent; }
+  .actions button[disabled] { opacity: 0.5; cursor: progress; }
+  :focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+  .said { font-size: 13px; padding-top: 10px; }
+  .said.good { color: var(--good); }
+  .said.bad { color: var(--bad); }
+  @media (max-width: 560px) {
+    .lift { grid-template-columns: 1fr 78px 84px; gap: 2px 10px; }
+    .actions input[type="text"] { min-width: 0; flex: 1 1 100%; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap" id="app">
+  <div class="top">
+    <h1 id="date">…</h1>
+    <div class="meta"><span id="sync">reading the database</span>
+      <a href="/">today</a>
+      <a href="/bloods">bloods</a>
+      <button type="button" id="refresh">refresh</button></div>
+  </div>
+  <div id="body"></div>
+  <footer id="foot"></footer>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const el = (tag, cls, html) => {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (html !== undefined) node.innerHTML = html;
+  return node;
+};
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g,
+  (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const CALL = { push: "good", proceed: "good", hold: "warn",
+               pull_back: "bad", insufficient_data: "flat" };
+
+let current = null;          // the document the page is rendering
+let override = "";           // a session the person asked for instead of today's
+
+function section(title, note) {
+  const box = el("section", "block");
+  box.append(el("h2", null, esc(title)));
+  if (note) box.append(el("p", "lede", esc(note)));
+  return box;
+}
+
+function renderLifts(plan) {
+  const box = section(plan.session === "rest" ? "Rest day" : `${plan.session} day`);
+  if (plan.deload) box.append(el("p", "lede", "Deload week — 85% loads, one set fewer, stop well short."));
+  for (const line of plan.adjustments || []) box.append(el("p", "lede", esc(line)));
+
+  if (!plan.exercises.length) {
+    box.append(el("p", "lede", plan.session === "rest"
+      ? "No lifting today. Recovery is where the last session gets paid for."
+      : "No session could be built — see the unmatched list below."));
+    return box;
+  }
+  for (const lift of plan.exercises) {
+    const row = el("div", "lift");
+    const [lo, hi] = lift.rep_range;
+    row.append(el("div", "name", esc(lift.exercise)));
+    row.append(el("div", "scheme", `${lift.sets} × ${lo}–${hi}`));
+    row.append(el("div", "load", lift.weight_kg ? `${lift.weight_kg} kg` : "—"));
+    if (lift.why) row.append(el("div", "why", esc(lift.why)));
+    if (lift.cue) row.append(el("div", "cue", esc(lift.cue)));
+    box.append(row);
+  }
+  if (plan.cardio && plan.cardio.kind !== "none" && plan.cardio.exercise) {
+    const row = el("div", "lift");
+    row.append(el("div", "name", esc(plan.cardio.exercise)));
+    row.append(el("div", "scheme", plan.cardio.kind === "hiit" ? "intervals" : "zone 2"));
+    row.append(el("div", "load", `${plan.cardio.minutes} min`));
+    row.append(el("div", "why", esc(plan.cardio.note)));
+    box.append(row);
+  }
+  if (plan.unmatched && plan.unmatched.length) {
+    box.append(el("p", "lede", `Not in your Hevy catalogue: ${esc(plan.unmatched.join(", "))}`));
+  }
+  return box;
+}
+
+function renderActions(doc) {
+  const box = section("Push and log");
+  const bar = el("div", "actions");
+
+  const picker = el("select");
+  picker.id = "session";
+  picker.setAttribute("aria-label", "Which session to push");
+  for (const name of doc.sessions || []) {
+    const option = el("option", null, name);
+    option.value = name;
+    if (name === doc.plan.session) option.selected = true;
+    picker.append(option);
+  }
+  picker.addEventListener("change", () => {
+    override = picker.value === doc.date_session ? "" : picker.value;
+    load(picker.value);
+  });
+
+  const push = el("button", null, "Push to Hevy");
+  push.addEventListener("click", () => act(push, "/api/plan/push",
+    { session: picker.value, date: doc.date }));
+
+  const weight = el("input");
+  weight.type = "number"; weight.step = "0.1"; weight.min = "30"; weight.max = "300";
+  weight.id = "weight"; weight.placeholder = "Weight, kg";
+  weight.setAttribute("aria-label", "Bodyweight in kilograms");
+
+  const logWeight = el("button", "quiet", "Log weight");
+  logWeight.addEventListener("click", () => {
+    const kg = parseFloat(weight.value);
+    if (!(kg >= 30 && kg <= 300)) { say("Enter a weight in kilograms, 30 to 300.", "bad"); weight.focus(); return; }
+    act(logWeight, "/api/checkin", { action: "weigh", weight_kg: kg }, () => { weight.value = ""; });
+  });
+
+  const note = el("input");
+  note.type = "text"; note.id = "note"; note.maxLength = 200;
+  note.placeholder = "How the session felt";
+  note.setAttribute("aria-label", "A note about today");
+
+  const logNote = el("button", "quiet", "Add note");
+  logNote.addEventListener("click", () => {
+    if (!note.value.trim()) { say("Write something first.", "bad"); note.focus(); return; }
+    act(logNote, "/api/checkin", { action: "note", text: note.value.trim() },
+        () => { note.value = ""; });
+  });
+
+  bar.append(picker, push, weight, logWeight, note, logNote);
+  box.append(bar, el("div", "said", ""));
+  box.lastChild.id = "said";
+
+  const pushed = (doc.pushed || []).find((p) => p.session === doc.plan.session);
+  if (pushed) {
+    box.append(el("p", "lede",
+      `${esc(pushed.title)} was last written to Hevy on ${esc(pushed.at.slice(0, 16).replace("T", " at "))}.`));
+  }
+  return box;
+}
+
+function say(message, cls) {
+  const box = $("said");
+  if (!box) return;
+  box.className = `said ${cls || ""}`;
+  box.textContent = message;
+}
+
+async function act(button, path, payload, after) {
+  const label = button.textContent;
+  button.disabled = true;
+  button.textContent = "working…";
+  say("");
+  try {
+    const response = await fetch(path, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const result = await response.json();
+    say(result.message || (result.ok ? "Done." : "That did not work."),
+        result.ok ? "good" : "bad");
+    if (result.ok && after) after();
+    if (result.ok) load(payload.session || override);
+  } catch (error) {
+    say(`Could not reach the server: ${error.message}`, "bad");
+  } finally {
+    button.disabled = false;
+    button.textContent = label;
+  }
+}
+
+function renderTargets(plan) {
+  const box = section("Targets");
+  const grid = el("div", "targets");
+  const add = (k, v, why) => {
+    const cell = el("div", "target");
+    cell.append(el("div", "k", esc(k)), el("div", "v", esc(v)));
+    if (why) cell.append(el("div", "why", esc(why)));
+    grid.append(cell);
+  };
+  if (plan.steps) add("steps", plan.steps.target.toLocaleString(), plan.steps.why);
+  if (plan.protein) add("protein", plan.protein.target_g ? `${plan.protein.target_g} g` : "—", plan.protein.why);
+  if (plan.energy) add("energy", `−${plan.energy.deficit_target} kcal`, plan.energy.why);
+  box.append(grid);
+  return box;
+}
+
+function renderVolume(plan) {
+  const rows = plan.priority_volume || [];
+  if (!rows.length) return null;
+  const box = section("Hard sets, last 7 days",
+    "Chest and arms are the block's priority; the band is the target range.");
+  const ceiling = Math.max(...rows.map((r) => Math.max(r.sets, r.target[1]))) * 1.15;
+  for (const row of rows) {
+    const line = el("div", "vol");
+    line.append(el("div", null, esc(row.muscle)));
+    const track = el("div", "track");
+    const band = el("div", "band");
+    band.style.left = `${(row.target[0] / ceiling) * 100}%`;
+    band.style.width = `${((row.target[1] - row.target[0]) / ceiling) * 100}%`;
+    const fill = el("div", "fill");
+    fill.style.width = `${Math.min(100, (row.sets / ceiling) * 100)}%`;
+    fill.style.background = row.verdict === "on target" ? "var(--good)"
+      : row.verdict === "under" ? "var(--warn)" : "var(--bad)";
+    track.append(band, fill);
+    line.append(track, el("div", "n", `${row.sets}`));
+    box.append(line);
+  }
+  return box;
+}
+
+function renderRecovery(doc) {
+  const recovery = doc.recovery || {};
+  if (!recovery.call) return null;
+  const box = section("Why that call");
+  if (recovery.advice) box.append(el("p", "lede", esc(recovery.advice)));
+  for (const signal of recovery.signals || []) {
+    const row = el("div", "lift");
+    row.append(el("div", "name", esc(signal.label)));
+    row.append(el("div", "scheme", `${signal.z > 0 ? "+" : ""}${signal.z} SD`));
+    row.append(el("div", "load", String(signal.value)));
+    box.append(row);
+  }
+  for (const reason of recovery.reasons || []) box.append(el("p", "lede", esc(reason)));
+  return box;
+}
+
+function render(doc) {
+  current = doc;
+  const when = new Date(`${doc.date}T12:00:00`);
+  $("date").textContent = when.toLocaleDateString(undefined,
+    { weekday: "long", day: "numeric", month: "long" });
+  const call = doc.plan.readiness;
+  $("sync").innerHTML = call
+    ? `readiness <span class="${CALL[call] || "flat"}">${esc(call.replace(/_/g, " "))}</span>`
+    : "no readiness reading";
+
+  const body = $("body");
+  body.replaceChildren();
+  for (const part of [renderLifts(doc.plan), renderActions(doc), renderTargets(doc.plan),
+                      renderVolume(doc.plan), renderRecovery(doc)]) {
+    if (part) body.append(part);
+  }
+  $("foot").textContent =
+    `Built from ${doc.days.length} days of your own data at ${new Date(doc.generated_at)
+      .toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}. `
+    + "Pushing writes one routine per session type into the AI Coach folder in Hevy.";
+}
+
+async function load(session) {
+  try {
+    const query = session ? `?session=${encodeURIComponent(session)}` : "";
+    const response = await fetch(`/api/plan${query}`);
+    const doc = await response.json();
+    if (doc.error) { $("sync").textContent = doc.error; return; }
+    doc.date_session = doc.date_session || doc.plan.session;
+    render(doc);
+  } catch (error) {
+    $("sync").textContent = `could not reach the server: ${error.message}`;
+  }
+}
+
+$("refresh").addEventListener("click", () => load(override));
+load();
+</script>
+</body>
+</html>

@@ -43,6 +43,7 @@ Built and tested:
 | **Energy availability** | Screening figure (kcal/kg fat-free mass/day) and a RED-S watch, dormant until nutrition/body-comp data connects; an under-fuelling watch that reads the same question off the scale, the load and your protocol today |
 | **Brief** | `health brief` — the day (or the week) read back to you in two paragraphs, on a schedule if you want it, pushed to your phone every morning if you want that |
 | **Agent tools** | 38 MCP tools — the surface Claude actually talks to |
+| **Training page** | `health serve` → /plan — today's session with the reason behind each load, the targets, the volume check; buttons to push the routine to Hevy and log a weigh-in |
 | **Interface** | A local page on 127.0.0.1, served from the same database — readiness, protocol, six-week drift, sleep architecture, check-in, experiment verdicts, load-ratio and sleep-debt charts, this week's research |
 | **Bloods page** | Drop a report in, see what is flagged, ask Claude to read it |
 | **Indicators** | Per-domain status with the evidence behind each — deliberately no single score |
@@ -668,6 +669,20 @@ downloads is gone. Archives carry a manifest describing what is inside them,
 restores refuse to merge into a non-empty `raw/` unless forced, and every path
 in an archive is checked before extraction — a tar file is a list of paths
 someone else wrote, and `../` is a legal one.
+
+## The training page
+
+`health serve` then **training** in the masthead — or `/plan` directly. The
+same session `health plan` computes, with the reason under every load, the
+step, protein and energy targets, the priority-volume bars and the recovery
+signals behind today's call.
+
+Two buttons do something: **Push to Hevy** writes the routine into the AI
+Coach folder, and **Log weight** records a weigh-in through the same path
+`health checkin` uses. A picker swaps the session when the calendar and what
+you actually trained have drifted apart. These are the only routes in this
+project that write anything from a browser; they are what you expose if you
+ever move the server off 127.0.0.1.
 
 ## The interface
 

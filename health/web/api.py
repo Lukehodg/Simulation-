@@ -238,6 +238,29 @@ def today_payload(store: Store, config: Config, day: date | None = None) -> dict
     }
 
 
+def plan_payload(store: Store, config: Config, day: date | None = None,
+                 session: str | None = None) -> dict[str, Any]:
+    """Today's training, for the page that can act on it.
+
+    The same document the phone readout reads, so one definition of "today's
+    session" serves both — plus which routine was last pushed, since the page
+    offers to push and should say when that last happened.
+    """
+    from ..features import bundle as bundle_features
+    from ..features import program as program_features
+
+    day = day or date.today()
+    document = bundle_features.build(store, day)
+    if session and session != document["plan"]["session"]:
+        document["plan"] = program_features.plan_session(store, day, kind=session).as_dict()
+
+    pushed = store.query(
+        "SELECT day_type, title, pushed_at FROM program_routines ORDER BY pushed_at DESC")
+    document["pushed"] = [{"session": d, "title": t, "at": str(a)} for d, t, a in pushed]
+    document["sessions"] = sorted(set(program_features.WEEK))
+    return document
+
+
 def bloods_payload(store: Store, config: Config) -> dict[str, Any]:
     """Everything the bloods page shows, including exactly what an analysis
     would send — so the boundary can be inspected before it is crossed."""

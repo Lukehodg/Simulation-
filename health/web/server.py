@@ -22,11 +22,12 @@ from urllib.parse import parse_qs, urlparse
 
 from ..config import Config
 from ..store import Store
-from .api import bloods_payload, metric_payload, today_payload
+from .api import bloods_payload, metric_payload, plan_payload, today_payload
 
 WEB = Path(__file__).parent
 HOST = "127.0.0.1"
-PAGES = {"/": "index.html", "/index.html": "index.html", "/bloods": "bloods.html"}
+PAGES = {"/": "index.html", "/index.html": "index.html", "/bloods": "bloods.html",
+         "/plan": "plan.html"}
 #: A lab report is a few hundred kilobytes; anything far past that is a mistake.
 MAX_UPLOAD = 25 * 1024 * 1024
 ALLOWED_UPLOADS = {".pdf", ".json", ".csv"}
@@ -91,6 +92,17 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": f"{type(exc).__name__}: {exc}"}, 500)
             return
 
+        if route.path == "/api/plan":
+            day = query.get("date", [None])[0]
+            try:
+                with self._store() as store:
+                    self._json(plan_payload(store, self.config,
+                                            date.fromisoformat(day) if day else None,
+                                            session=query.get("session", [None])[0]))
+            except Exception as exc:  # noqa: BLE001 - shown in the page
+                self._json({"error": f"{type(exc).__name__}: {exc}"}, 500)
+            return
+
         if route.path == "/api/metric":
             metric = query.get("metric", [""])[0]
             days = int(query.get("days", ["90"])[0])
@@ -114,6 +126,14 @@ class Handler(BaseHTTPRequestHandler):
 
         if route.path == "/api/labs/analyse":
             self._analyse()
+            return
+
+        if route.path == "/api/plan/push":
+            self._push_routine()
+            return
+
+        if route.path == "/api/checkin":
+            self._checkin()
             return
 
         self._send(404, b"not found", "text/plain; charset=utf-8")
@@ -177,6 +197,45 @@ class Handler(BaseHTTPRequestHandler):
             })
         except Exception as exc:  # noqa: BLE001 - shown in the page
             self._json({"error": f"{type(exc).__name__}: {exc}"}, 500)
+
+    # The only two routes that change anything. Both are deliberate actions a
+    # person took on the page, and both are things the CLI already does — the
+    # page is a second way in, not a second implementation. If you ever put
+    # this server on a network, these are what you are exposing.
+
+    def _push_routine(self) -> None:
+        from ..features import program as program_features
+
+        try:
+            request = json.loads(self._body() or b"{}")
+            session = request.get("session") or None
+            day = (date.fromisoformat(request["date"]) if request.get("date")
+                   else date.today())
+            with self._store(write=True) as store:
+                plan = program_features.plan_session(store, day, kind=session)
+                if plan.is_rest:
+                    self._json({"ok": False,
+                                "message": "Rest day — nothing to push."})
+                    return
+                from ..cli import _push_plan
+
+                action = _push_plan(store, self.config, plan)
+            self._json({"ok": True, "action": action, "title": plan.title,
+                        "message": f"{plan.title} {action} in Hevy."})
+        except Exception as exc:  # noqa: BLE001 - shown in the page
+            self._json({"ok": False, "message": f"{type(exc).__name__}: {exc}"}, 500)
+
+    def _checkin(self) -> None:
+        """A weigh-in or a note, through the same path `health checkin` uses."""
+        from ..features import bundle as bundle_features
+
+        try:
+            request = json.loads(self._body() or b"{}")
+            with self._store(write=True) as store:
+                message = bundle_features.apply_request(store, self.config, request)
+            self._json({"ok": not message.startswith("ignored"), "message": message})
+        except Exception as exc:  # noqa: BLE001 - shown in the page
+            self._json({"ok": False, "message": f"{type(exc).__name__}: {exc}"}, 500)
 
     def _store(self, write: bool = False) -> Store:
         """Open for the length of one request and no longer.
